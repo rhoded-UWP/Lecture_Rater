@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lecture Coach</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b0d10'/%3E%3Ccircle cx='8' cy='8' r='4' fill='%23ff3b41'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/studio.css">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header class="console-header">
+    <div class="brand">
+      <span class="brand-badge">LC·1</span>
+      <div class="brand-text">
+        <h1>Lecture Coach</h1>
+      </div>
+    </div>
+
+    <nav class="tabs" id="main-nav">
+      <button class="tab active" data-view="setup" id="nav-setup">Console</button>
+      <button class="tab" data-view="history" id="nav-history">History</button>
+    </nav>
+
+    <div class="onair" id="onair-lamp" role="status" aria-live="polite">
+      <span class="onair-dot"></span>
+      <span class="onair-text">ON AIR</span>
+    </div>
+  </header>
+
+  <main id="views">
+
+    <!-- ============================== 1 · SESSION SETUP -->
+    <section class="view active" id="view-setup">
+      <div class="banner warn hidden" id="chrome-warning">
+        ⚠ Web Speech API not detected. Live transcription requires <strong>Google Chrome</strong>. Note: Chrome routes recognition audio through Google's servers.
+      </div>
+
+      <div class="setup-grid">
+        <div class="col">
+          <div class="module">
+            <div class="module-label"><span class="led"></span>Mode</div>
+            <div id="mode-list" class="mode-list">
+              <div class="dim-note">Loading modes…</div>
+            </div>
+          </div>
+
+          <div class="module">
+            <div class="module-label"><span class="led"></span>Session Type</div>
+            <div class="type-toggle" id="type-toggle">
+              <button class="type-btn active" data-type="rehearsal">Rehearsal</button>
+              <button class="type-btn" data-type="live">Live Classroom</button>
+            </div>
+            <p class="dim-note hidden" id="live-privacy-note">
+              Live mode: student speech is never fact-checked or scored. Transcript near activity boundaries is excluded from the accuracy pass. Session data stays in this browser.
+            </p>
+          </div>
+
+          <div class="module">
+            <div class="module-label"><span class="led"></span>Pacing Profile</div>
+            <div class="type-toggle" id="pace-toggle">
+              <button class="type-btn" data-profile="standard">Standard<br><small>sweet spot 116–150 WPM</small></button>
+              <button class="type-btn" data-profile="dense">Dense · Note-Heavy<br><small>sweet spot 110–135 WPM</small></button>
+            </div>
+            <p class="dim-note">Research-based bands — see <code>Words_Per_Minute_Research.md</code>. Use Dense when students must listen, think, and take notes at once.</p>
+          </div>
+
+          <div class="module">
+            <div class="module-label"><span class="led"></span>Mic Check</div>
+            <div class="mic-check">
+              <div class="vu-track" id="mic-vu"><div class="vu-fill" id="mic-vu-fill"></div></div>
+              <button class="btn" id="mic-check-btn">Open Mic</button>
+            </div>
+            <p class="dim-note">Speak at lecture volume — the meter should ride the upper half. Test the actual classroom mic.</p>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="module">
+            <div class="module-label"><span class="led"></span>Learning Objectives &amp; Outcomes</div>
+            <div class="obj-block">
+              <label class="obj-title" for="lecture-objectives">Lecture objectives — this session</label>
+              <textarea id="lecture-objectives" rows="3" placeholder="one objective per line — e.g.&#10;Students can write a for loop over a list"></textarea>
+              <label class="btn subtle upload-label">Upload .txt / .json<input type="file" id="objectives-file" accept=".txt,.md,.json" hidden></label>
+            </div>
+            <div class="obj-block">
+              <label class="obj-title" for="course-outcomes">Student learning outcomes — entire course <span class="obj-mode-tag mono" id="slo-mode-tag"></span></label>
+              <textarea id="course-outcomes" rows="3" placeholder="one outcome per line — saved per mode"></textarea>
+              <label class="btn subtle upload-label">Upload .txt / .json<input type="file" id="outcomes-file" accept=".txt,.md,.json" hidden></label>
+            </div>
+            <p class="dim-note">Stored locally and attached to each saved session. A future phase will use AI to measure time spent per objective and how accurately related content was relayed — per lecture and across the course.</p>
+          </div>
+
+          <details class="module settings-module" id="settings-panel">
+            <summary class="module-label"><span class="led"></span>Scoring Settings</summary>
+            <div class="settings-grid" id="settings-grid"></div>
+            <button class="btn subtle" id="settings-reset">Reset to defaults</button>
+          </details>
+        </div>
+      </div>
+
+      <div class="golive-row">
+        <button class="golive-btn" id="golive-btn" disabled>
+          <span class="golive-dot"></span> GO LIVE
+        </button>
+        <span class="dim-note" id="golive-hint">select a mode to arm the console</span>
+      </div>
+    </section>
+
+    <!-- ============================== 2 · LIVE DASHBOARD -->
+    <section class="view" id="view-live">
+      <div class="live-grid">
+
+        <div class="module gauge-module">
+          <div class="module-label"><span class="led lit-green"></span>Pace · WPM</div>
+          <svg class="dial" id="wpm-dial" viewBox="0 0 200 158" aria-label="Words per minute dial">
+            <path id="dial-arc-bg" fill="none" stroke="#232830" stroke-width="10" stroke-linecap="round"/>
+            <g id="dial-zones" fill="none" stroke-width="10"></g>
+            <g id="dial-ticks" font-family="IBM Plex Mono" font-size="9" fill="#8a919e"></g>
+            <line id="dial-needle" x1="100" y1="110" x2="100" y2="30" stroke="#ffb454" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="100" cy="110" r="6" fill="#ffb454"/>
+          </svg>
+          <div class="readout" id="wpm-readout">—</div>
+          <div class="readout-unit">words / min</div>
+          <div class="pace-word mono" id="pace-word">&nbsp;</div>
+        </div>
+
+        <div class="module gauge-module">
+          <div class="module-label"><span class="led lit-green"></span>Fillers</div>
+          <div class="readout huge" id="fpm-readout">0.0</div>
+          <div class="readout-unit">per minute · <span id="filler-total">0</span> total</div>
+          <div class="recent-fillers" id="recent-fillers"></div>
+        </div>
+
+        <div class="module gauge-module">
+          <div class="module-label"><span class="led lit-green"></span>Continuous Lecture</div>
+          <div class="readout huge stopwatch" id="gap-stopwatch">0:00</div>
+          <div class="readout-unit"><span id="nl-count">0</span> nonlecture blocks</div>
+        </div>
+
+        <div class="module gauge-module">
+          <div class="module-label"><span class="led lit-green"></span>Vocal Energy</div>
+          <div class="vu-vertical-wrap">
+            <div class="vu-track tall" id="energy-vu"><div class="vu-fill" id="energy-vu-fill"></div></div>
+            <div class="vu-scale"><span>FLAT</span><span>DYNAMIC</span></div>
+          </div>
+          <div class="readout-unit" id="energy-word">listening…</div>
+        </div>
+
+        <div class="module transcript-module" id="transcript-module">
+          <div class="module-label">
+            <span class="led lit-green"></span>Live Transcript
+            <label class="switch">
+              <input type="checkbox" id="transcript-toggle" checked>
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="transcript-scroll" id="live-transcript" aria-live="off"></div>
+        </div>
+
+      </div>
+
+      <div class="live-bottom">
+        <div class="strip-wrap">
+          <canvas id="timeline-strip" class="timeline-strip"></canvas>
+        </div>
+        <div class="live-controls">
+          <div class="timer-stack mono">
+            <div class="timer-row"><span class="timer-tag">LEC</span><b id="timer-lecture">0:00</b></div>
+            <div class="timer-row nl"><span class="timer-tag">ACT</span><b id="timer-nonlecture">0:00</b></div>
+            <div class="timer-row total"><span class="timer-tag">TOT</span><b id="timer-total">0:00</b></div>
+          </div>
+          <button class="interaction-btn" id="interaction-btn">
+            <span class="interaction-key">SPACE</span>
+            <span id="nl-btn-text">NONLECTURE ACTIVITY · LAB / VIDEO</span>
+          </button>
+          <button class="btn danger" id="end-btn">■ End Session</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== 2.5 · PROCESSING -->
+    <section class="view" id="view-processing">
+      <div class="processing-box module">
+        <div class="module-label"><span class="led lit-amber"></span>Post-Session Processing</div>
+        <ul class="proc-steps">
+          <li id="proc-transcribe"><span class="proc-led"></span> Precision transcript (Whisper) <em class="proc-status">queued</em></li>
+          <li id="proc-factcheck"><span class="proc-led"></span> Fact-check (Claude) <em class="proc-status">queued</em></li>
+          <li id="proc-scoring"><span class="proc-led"></span> Scoring <em class="proc-status">queued</em></li>
+        </ul>
+        <p class="dim-note">This takes ~30–90 s. First run after idle may hit a server cold start.</p>
+      </div>
+    </section>
+
+    <!-- ============================== 3 · REPORT -->
+    <section class="view" id="view-report">
+      <div class="report-header module">
+        <div>
+          <div class="module-label"><span class="led lit-amber"></span>Session Report</div>
+          <div class="report-meta mono" id="report-meta"></div>
+        </div>
+        <div class="headline-score">
+          <div class="readout huge" id="overall-score">—</div>
+          <div class="readout-unit">overall <span id="overall-delta" class="delta"></span></div>
+        </div>
+      </div>
+
+      <div class="subscore-row" id="subscore-row"></div>
+
+      <div class="report-grid">
+        <div class="module span2">
+          <div class="module-label"><span class="led"></span>Monologue Graph — continuous lecture between nonlecture activity</div>
+          <canvas id="monologue-chart" class="chart tallchart"></canvas>
+        </div>
+        <div class="module">
+          <div class="module-label"><span class="led"></span>Pace Over Time</div>
+          <canvas id="wpm-chart" class="chart"></canvas>
+          <div class="pace-zones" id="pace-zones"></div>
+        </div>
+        <div class="module">
+          <div class="module-label"><span class="led"></span>Energy Over Time</div>
+          <canvas id="energy-chart" class="chart"></canvas>
+        </div>
+        <div class="module">
+          <div class="module-label"><span class="led"></span>Filler / Tic Breakdown</div>
+          <table class="data-table" id="filler-table"></table>
+        </div>
+        <div class="module">
+          <div class="module-label"><span class="led"></span>Stutters &amp; Restarts</div>
+          <ul class="flag-list" id="stutter-list"></ul>
+        </div>
+        <div class="module span2">
+          <div class="module-label"><span class="led"></span>Accuracy Report</div>
+          <div id="accuracy-report"></div>
+        </div>
+        <div class="module span2 hidden" id="objectives-module">
+          <div class="module-label"><span class="led"></span>Learning Objectives &amp; Outcomes</div>
+          <div id="objectives-report"></div>
+          <p class="dim-note">AI coverage analysis — time per objective and accuracy of related content, per lecture and across the course — is planned for a future phase.</p>
+        </div>
+        <div class="module span2">
+          <div class="module-label"><span class="led"></span>Annotated Transcript</div>
+          <div class="transcript-full" id="report-transcript"></div>
+        </div>
+      </div>
+
+      <div class="report-actions">
+        <button class="btn primary" id="save-session-btn">Save Session</button>
+        <button class="btn" id="export-session-btn">Export JSON</button>
+        <button class="btn subtle" id="new-session-btn">New Session</button>
+      </div>
+    </section>
+
+    <!-- ============================== 4 · HISTORY -->
+    <section class="view" id="view-history">
+      <div class="history-top">
+        <div class="module">
+          <div class="module-label"><span class="led"></span>Personal Records</div>
+          <ul class="records-list" id="records-list"></ul>
+        </div>
+        <div class="module">
+          <div class="module-label"><span class="led"></span>Score Trends</div>
+          <div class="trend-grid" id="trend-grid"></div>
+        </div>
+      </div>
+
+      <div class="module">
+        <div class="module-label">
+          <span class="led"></span>Saved Sessions
+          <label class="btn subtle import-label">Import JSON<input type="file" id="import-input" accept=".json" hidden></label>
+        </div>
+        <div id="session-list" class="session-list"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="console-footer mono">
+    <span></span>
+    <span id="footer-status">STANDBY</span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

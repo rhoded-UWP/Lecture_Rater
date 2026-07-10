@@ -1,0 +1,10 @@
+{
+  "id": "default",
+  "title": "Default — No Content Check",
+  "subject": "Any subject — delivery metrics only, no fact-checking",
+  "level": "any",
+  "factcheck": false,
+  "strictness": "Not applicable — this mode never runs the fact-check pass.",
+  "topics": [],
+  "misconceptionTraps": []
+}

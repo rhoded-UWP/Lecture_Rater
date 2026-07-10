@@ -1,0 +1,25 @@
+{
+  "id": "intro-cs",
+  "title": "Intro to Computer Science",
+  "subject": "General computer science concepts for students with no prior background",
+  "level": "intro",
+  "strictness": "Flag statements that are wrong, and oversimplifications likely to cause misconceptions later. Do not flag reasonable pedagogical simplification.",
+  "topics": [
+    "what computers are (hardware vs software)",
+    "binary and data representation",
+    "algorithms and pseudocode",
+    "programming languages overview",
+    "how the internet works",
+    "files, memory, and storage",
+    "computational thinking / decomposition",
+    "basic computer ethics and safety"
+  ],
+  "misconceptionTraps": [
+    "Saying memory (RAM) and storage (disk) are the same thing",
+    "Saying the internet and the web are the same thing — flag if taught as identical",
+    "Implying computers 'understand' code rather than executing instructions",
+    "Saying binary means 'just 0s and 1s' without connecting it to representing data — fine at intro level, don't flag",
+    "Confusing compilers with interpreters when the distinction is the point of the lesson",
+    "Saying deleting a file immediately erases it from the disk"
+  ]
+}

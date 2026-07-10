@@ -1,0 +1,13 @@
+{
+  "id": "intro-python",
+  "title": "Intro to Python",
+  "subject": "Python programming for first-time programmers",
+  "level": "intro",
+  "strictness": "Flag statements that are wrong, and oversimplifications likely to cause misconceptions later. Do not flag reasonable pedagogical simplification.",
+  "topics": ["variables", "types", "strings", "input/print", "conditionals", "loops", "functions", "lists"],
+  "misconceptionTraps": [
+    "Confusing = (assignment) with == (comparison)",
+    "Saying variables 'store' values vs. referencing objects — fine at intro level, don't flag",
+    "input() returns a string — forgetting to mention casting"
+  ]
+}
