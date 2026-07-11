@@ -1,7 +1,13 @@
 // Lecture Coach — Express server.
-// Serves the static front end plus three API routes. All session state lives
-// in the browser; this server holds nothing. Audio is received in memory,
-// forwarded to Whisper, and released — it is never written to disk.
+// Serves the static front end plus the API routes. All session state lives
+// in the browser; this server holds nothing except dev-settings.json (which
+// provider/model each pipeline role uses). Audio is received in memory,
+// forwarded to the active transcription provider, and released — it is never
+// written to disk.
+//
+// Provider swapping: providers/catalog.js declares every available endpoint;
+// settings-store.js remembers the active choice; the dev panel switches it
+// at runtime via /api/settings.
 
 import express from 'express';
 import multer from 'multer';
@@ -11,13 +17,19 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import {
+  TRANSCRIPTION_PROVIDERS,
+  ANALYSIS_MODELS,
+  findAnalysisModel,
+  isConfigured,
+} from './providers/catalog.js';
+import { transcribeAudio } from './providers/transcription.js';
+import { runAnalysis, extractJson } from './providers/analysis.js';
+import { getSettings, updateSettings } from './settings-store.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MODES_DIR = path.join(__dirname, 'modes');
 const PORT = process.env.PORT || 3000;
-
-const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
-const FACTCHECK_MODEL = process.env.FACTCHECK_MODEL || 'claude-haiku-4-5-20251001';
 
 // Audio stays in memory only (the non-negotiable rule). 120 MB ceiling covers
 // a 50-minute lecture even in an uncompressed-ish format.
@@ -48,41 +60,56 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '10mb' }));
 
 // --------------------------------------------------------------- /api/status
-// Configuration state for the developer panel. Never returns key material —
-// only whether each pass is configured and which model the server will use.
+// Lightweight health/config summary. Never returns key material.
 app.get('/api/status', (_req, res) => {
+  const s = getSettings();
   res.json({
-    whisperConfigured: !!OPENAI_KEY,
-    claudeConfigured: !!ANTHROPIC_KEY,
-    factcheckModel: FACTCHECK_MODEL,
+    whisperConfigured: !!process.env.OPENAI_API_KEY,
+    claudeConfigured: !!process.env.ANTHROPIC_API_KEY,
+    factcheckModel: s.factcheckModelId,
+    transcriptionProvider: s.transcriptionProvider,
+    deepAnalysisModel: s.deepAnalysisModelId,
     ffmpeg: ffmpegOk,
     uptimeSec: Math.round(process.uptime()),
   });
 });
 
-// Shared Whisper call: audio buffer in → word-timestamped transcript out.
-async function whisperTranscribe(buffer, mimetype, filename) {
-  const form = new FormData();
-  form.append('file', new Blob([buffer], { type: mimetype }), filename);
-  form.append('model', 'whisper-1');
-  form.append('response_format', 'verbose_json');
-  form.append('timestamp_granularities[]', 'word');
-  form.append('timestamp_granularities[]', 'segment');
-  return fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_KEY}` },
-    body: form,
-  });
-}
+// ------------------------------------------------------------- /api/settings
+// The dev panel's provider-swap surface. GET returns the active settings plus
+// the full catalog (with configured flags + pricing for cost estimates);
+// POST applies a partial update and returns the same payload.
 
-function shapeTranscript(data) {
+function settingsPayload() {
+  const s = getSettings();
   return {
-    text: data.text || '',
-    words: data.words || [],
-    segments: (data.segments || []).map((s) => ({ t: s.start, end: s.end, text: s.text.trim() })),
-    durationSec: data.duration ?? null,
+    settings: s,
+    transcriptionProviders: TRANSCRIPTION_PROVIDERS.map((p) => ({
+      id: p.id,
+      label: p.label,
+      model: p.model,
+      envKey: p.envKey,
+      configured: isConfigured(p),
+      costPerMin: p.costPerMin,
+      approxPricing: p.approxPricing,
+    })),
+    analysisModels: ANALYSIS_MODELS.map((m) => ({
+      id: m.id,
+      label: m.label,
+      provider: m.providerLabel,
+      envKey: m.envKey,
+      configured: isConfigured(m),
+      pricing: m.pricing,
+      approxPricing: m.approxPricing,
+    })),
   };
 }
+
+app.get('/api/settings', (_req, res) => res.json(settingsPayload()));
+
+app.post('/api/settings', (req, res) => {
+  updateSettings(req.body || {});
+  res.json(settingsPayload());
+});
 
 // ---------------------------------------------------------------- /api/modes
 app.get('/api/modes', async (_req, res) => {
@@ -102,29 +129,28 @@ app.get('/api/modes', async (_req, res) => {
   }
 });
 
+async function loadMode(modeId) {
+  const safeId = String(modeId).replace(/[^a-z0-9-_]/gi, '');
+  return JSON.parse(await readFile(path.join(MODES_DIR, `${safeId}.json`), 'utf8'));
+}
+
 // ----------------------------------------------------------- /api/transcribe
-// Browser uploads the session audio once → Whisper (word timestamps) → the
-// buffer is dropped. Nothing persisted.
+// Browser uploads the session audio once → active transcription provider
+// (word timestamps) → the buffer is dropped. Nothing persisted.
 app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
-  if (!OPENAI_KEY) {
-    return res.status(503).json({ error: 'Precision transcription is not configured (OPENAI_API_KEY missing).' });
-  }
   if (!req.file || !req.file.buffer?.length) {
     return res.status(400).json({ error: 'No audio file received.' });
   }
   try {
-    const r = await whisperTranscribe(
+    const result = await transcribeAudio(
+      getSettings().transcriptionProvider,
       req.file.buffer,
       req.file.mimetype || 'audio/webm',
       req.file.originalname || 'session.webm'
     );
-    if (!r.ok) {
-      const detail = await r.text().catch(() => '');
-      return res.status(502).json({ error: `Whisper request failed (${r.status})`, detail: detail.slice(0, 500) });
-    }
-    res.json(shapeTranscript(await r.json()));
+    res.json(result);
   } catch (err) {
-    res.status(500).json({ error: `Transcription failed: ${err.message}` });
+    res.status(err.status || 500).json({ error: err.message, detail: err.detail || undefined });
   } finally {
     // Audio-deletion guarantee: memory storage means nothing ever hit disk;
     // drop the reference so the buffer is collectable immediately.
@@ -145,10 +171,6 @@ app.post('/api/transcribe-video', uploadVideo.single('video'), async (req, res) 
   }
   const videoPath = req.file.path;
   const audioPath = `${videoPath}.ogg`;
-  if (!OPENAI_KEY) {
-    await rmQuiet(videoPath);
-    return res.status(503).json({ error: 'Precision transcription is not configured (OPENAI_API_KEY missing).' });
-  }
   if (!ffmpegOk) {
     await rmQuiet(videoPath);
     return res.status(503).json({ error: 'ffmpeg is not available on this server — the MP4 pipeline is a local testing feature.' });
@@ -171,14 +193,15 @@ app.post('/api/transcribe-video', uploadVideo.single('video'), async (req, res) 
     const audio = await readFile(audioPath);
     await rmQuiet(audioPath); // audio now exists only in memory
 
-    const r = await whisperTranscribe(audio, 'audio/ogg', 'lecture.ogg');
-    if (!r.ok) {
-      const detail = await r.text().catch(() => '');
-      return res.status(502).json({ error: `Whisper request failed (${r.status})`, detail: detail.slice(0, 500) });
-    }
-    res.json(shapeTranscript(await r.json()));
+    const result = await transcribeAudio(
+      getSettings().transcriptionProvider,
+      audio,
+      'audio/ogg',
+      'lecture.ogg'
+    );
+    res.json(result);
   } catch (err) {
-    res.status(500).json({ error: `Video processing failed: ${err.message}` });
+    res.status(err.status || 500).json({ error: err.message, detail: err.detail || undefined });
   } finally {
     await rmQuiet(videoPath);
     await rmQuiet(audioPath);
@@ -186,11 +209,9 @@ app.post('/api/transcribe-video', uploadVideo.single('video'), async (req, res) 
 });
 
 // ------------------------------------------------------------ /api/factcheck
-// Transcript + mode id → Claude reviews against the mode file → accuracy flags.
+// Quick pass: transcript + mode id → active fact-check model reviews against
+// the mode file → accuracy flags. Runs automatically after every session.
 app.post('/api/factcheck', async (req, res) => {
-  if (!ANTHROPIC_KEY) {
-    return res.status(503).json({ error: 'Fact-checking is not configured (ANTHROPIC_API_KEY missing).' });
-  }
   const { transcript, modeId } = req.body || {};
   if (!Array.isArray(transcript) || !transcript.length || !modeId) {
     return res.status(400).json({ error: 'Expected { transcript: [{t, text}], modeId }.' });
@@ -198,8 +219,7 @@ app.post('/api/factcheck', async (req, res) => {
 
   let mode;
   try {
-    const safeId = String(modeId).replace(/[^a-z0-9-_]/gi, '');
-    mode = JSON.parse(await readFile(path.join(MODES_DIR, `${safeId}.json`), 'utf8'));
+    mode = await loadMode(modeId);
   } catch {
     return res.status(404).json({ error: `Unknown mode: ${modeId}` });
   }
@@ -207,9 +227,7 @@ app.post('/api/factcheck', async (req, res) => {
     return res.status(400).json({ error: `Mode "${mode.title}" has fact-checking disabled.` });
   }
 
-  const stamp = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
   const transcriptText = transcript.map((s) => `[${stamp(s.t)}] ${s.text}`).join('\n');
-
   const topicsLine = mode.topics?.length ? `\nTopics: ${mode.topics.join(', ')}` : '';
   const trapsBlock = mode.misconceptionTraps?.length
     ? `\nKnown misconception traps to watch for:\n${mode.misconceptionTraps.map((m) => `- ${m}`).join('\n')}`
@@ -231,50 +249,141 @@ TRANSCRIPT:
 ${transcriptText}`;
 
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: FACTCHECK_MODEL,
-        max_tokens: 4000,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-    if (!r.ok) {
-      const detail = await r.text().catch(() => '');
-      return res.status(502).json({ error: `Claude request failed (${r.status})`, detail: detail.slice(0, 500) });
+    const result = await runAnalysis(getSettings().factcheckModelId, prompt, { maxTokens: 4000 });
+    const parsed = extractJson(result.text, 'array');
+    if (parsed === null && /\[/.test(result.text)) {
+      return res.status(502).json({ error: 'Fact-check response was not valid JSON.', raw: result.text.slice(0, 500) });
     }
-    const data = await r.json();
-    const text = (data.content || []).map((b) => b.text || '').join('');
-    const match = text.match(/\[[\s\S]*\]/); // tolerate stray prose around the array
-    let flags = [];
-    if (match) {
-      try {
-        flags = JSON.parse(match[0]).filter(
-          (f) => f && typeof f.quote === 'string' && ['low', 'medium', 'high'].includes(f.severity)
-        );
-      } catch {
-        return res.status(502).json({ error: 'Fact-check response was not valid JSON.', raw: text.slice(0, 500) });
-      }
-    }
+    const flags = (parsed || [])
+      .filter((f) => f && typeof f.quote === 'string' && ['low', 'medium', 'high'].includes(f.severity))
+      .map((f) => ({ ...f, t: toSeconds(f.t) }));
     res.json({
       flags,
-      model: data.model || FACTCHECK_MODEL,
-      usage: data.usage
-        ? { inputTokens: data.usage.input_tokens ?? 0, outputTokens: data.usage.output_tokens ?? 0 }
-        : null,
+      model: result.model,
+      provider: result.provider,
+      usage: result.usage,
+      costUSD: result.costUSD,
     });
   } catch (err) {
-    res.status(500).json({ error: `Fact-check failed: ${err.message}` });
+    res.status(err.status || 500).json({ error: `Fact-check failed: ${err.message}`, detail: err.detail || undefined });
   }
 });
 
+// -------------------------------------------------------- /api/deep-analysis
+// The paid, on-demand pass — NEVER runs automatically. Does a thorough
+// content review plus learning-outcome alignment: for each lecture objective
+// and course outcome, was it covered, how much time did it get, and was the
+// related content accurate?
+app.post('/api/deep-analysis', async (req, res) => {
+  const { transcript, modeId, lectureObjectives = [], courseOutcomes = [] } = req.body || {};
+  if (!Array.isArray(transcript) || !transcript.length) {
+    return res.status(400).json({ error: 'Expected { transcript: [{t, text}], modeId, lectureObjectives?, courseOutcomes? }.' });
+  }
+
+  let mode = null;
+  try {
+    if (modeId) mode = await loadMode(modeId);
+  } catch {
+    /* unknown mode — proceed with generic context */
+  }
+
+  // Outcomes come from two places (the "Both" design): the mode file's
+  // course-level learningOutcomes, plus whatever the instructor typed for
+  // this session. Dedupe by exact text.
+  const courseLevel = [...new Set([...(mode?.learningOutcomes || []), ...courseOutcomes])];
+  const lectureLevel = [...new Set(lectureObjectives)];
+
+  const transcriptText = transcript.map((s) => `[${stamp(s.t)}] ${s.text}`).join('\n');
+  const contextBlock = mode
+    ? `Subject: ${mode.subject}\nLevel: ${mode.level}${mode.topics?.length ? `\nTopics: ${mode.topics.join(', ')}` : ''}\nStrictness policy: ${mode.strictness}`
+    : 'Subject: infer the discipline and audience level from the transcript itself.';
+  const objBlock = lectureLevel.length
+    ? `\nLECTURE OBJECTIVES (this session):\n${lectureLevel.map((o) => `- ${o}`).join('\n')}`
+    : '';
+  const outBlock = courseLevel.length
+    ? `\nCOURSE LEARNING OUTCOMES:\n${courseLevel.map((o) => `- ${o}`).join('\n')}`
+    : '';
+
+  const prompt = `You are performing a deep instructional analysis of a recorded lecture for the instructor's own coaching. Course context:
+
+${contextBlock}
+${objBlock}${outBlock}
+
+Do THREE things with the transcript below:
+
+1. CONTENT REVIEW (thorough): identify factual errors, misleading oversimplifications, imprecise definitions, and important caveats that were skipped. Reasonable pedagogical simplification for the level is fine and should NOT be flagged. The transcript is machine-generated — ignore transcription artifacts and garbled words.
+
+2. OUTCOME ALIGNMENT: for EACH lecture objective and course outcome listed above, judge whether this lecture covered it. Use the [mm:ss] stamps to cite where, and estimate roughly how many minutes were spent on it. If no objectives/outcomes were provided, infer 3-6 apparent objectives from the lecture itself and assess those (mark them scope "inferred").
+
+3. COACHING: a short overall summary and 2-4 concrete, actionable suggestions.
+
+Respond with ONLY a JSON object (no prose, no code fence) in exactly this shape:
+{
+  "summary": "<2-4 sentence overview of the lecture's content quality and coverage>",
+  "contentFindings": [{"t": <seconds>, "quote": "<statement>", "severity": "low"|"medium"|"high", "explanation": "<why + correction, 1-3 sentences>"}],
+  "objectives": [{"text": "<the objective/outcome verbatim>", "scope": "lecture"|"course"|"inferred", "status": "covered"|"partial"|"missed", "minutes": <estimated minutes spent, number>, "evidence": [{"t": <seconds>, "note": "<what happened here>"}], "comment": "<1-2 sentence judgment, incl. accuracy of the related content>"}],
+  "suggestions": ["<concrete suggestion>", "..."]
+}
+
+TRANSCRIPT:
+${transcriptText}`;
+
+  try {
+    const result = await runAnalysis(getSettings().deepAnalysisModelId, prompt, { maxTokens: 8000 });
+    const parsed = extractJson(result.text, 'object');
+    if (!parsed || typeof parsed !== 'object') {
+      return res.status(502).json({ error: 'Deep-analysis response was not valid JSON.', raw: result.text.slice(0, 500) });
+    }
+    res.json({
+      analysis: {
+        summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+        contentFindings: Array.isArray(parsed.contentFindings)
+          ? parsed.contentFindings
+              .filter((f) => f && typeof f.quote === 'string')
+              .map((f) => ({ ...f, t: toSeconds(f.t) }))
+          : [],
+        objectives: Array.isArray(parsed.objectives)
+          ? parsed.objectives
+              .filter((o) => o && typeof o.text === 'string')
+              .map((o) => ({
+                ...o,
+                evidence: Array.isArray(o.evidence)
+                  ? o.evidence.map((e) => ({ ...e, t: toSeconds(e?.t) }))
+                  : [],
+              }))
+          : [],
+        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.filter((s) => typeof s === 'string') : [],
+      },
+      model: result.model,
+      provider: result.provider,
+      usage: result.usage,
+      costUSD: result.costUSD,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: `Deep analysis failed: ${err.message}`, detail: err.detail || undefined });
+  }
+});
+
+const stamp = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+// Models sometimes return timestamps as "mm:ss" strings despite being asked
+// for seconds — normalize either form to a number so the UI clock renders.
+function toSeconds(t) {
+  if (typeof t === 'number' && Number.isFinite(t)) return t;
+  if (typeof t === 'string') {
+    const m = t.match(/^(\d+):(\d{1,2})$/);
+    if (m) return Number(m[1]) * 60 + Number(m[2]);
+    const n = Number(t);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
 app.listen(PORT, () => {
+  const s = getSettings();
+  const flag = (envKey) => (process.env[envKey] ? 'key set' : `NOT configured (set ${envKey})`);
   console.log(`Lecture Coach on http://localhost:${PORT}`);
-  console.log(`  Whisper pass:    ${OPENAI_KEY ? 'configured' : 'NOT configured (set OPENAI_API_KEY)'}`);
-  console.log(`  Fact-check pass: ${ANTHROPIC_KEY ? `configured (${FACTCHECK_MODEL})` : 'NOT configured (set ANTHROPIC_API_KEY)'}`);
+  console.log(`  Transcription:  ${s.transcriptionProvider} — OpenAI ${flag('OPENAI_API_KEY')} · AssemblyAI ${flag('ASSEMBLYAI_API_KEY')}`);
+  console.log(`  Fact-check:     ${s.factcheckModelId} — Anthropic ${flag('ANTHROPIC_API_KEY')}`);
+  console.log(`  Deep analysis:  ${s.deepAnalysisModelId} — DeepSeek ${flag('DEEPSEEK_API_KEY')} · Moonshot ${flag('MOONSHOT_API_KEY')}`);
 });

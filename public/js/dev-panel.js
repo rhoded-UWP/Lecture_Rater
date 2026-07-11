@@ -3,49 +3,17 @@
 // Gate: the developer password is never stored anywhere in this codebase —
 // only its SHA-256 digest lives below; the input is hashed with Web Crypto
 // and compared. (This is an obfuscation gate for a single-user tool, not
-// real security: the actual secrets — API keys — live only in Render
+// real security: the actual secrets — API keys — live only in server
 // environment variables and never reach the browser.)
 //
-// Panel: registry of the AI endpoints behind each pipeline role (editable,
-// persisted locally — a skeleton for the future provider-swap feature) plus
-// a token/usage ledger fed by app.js after each processing pass.
+// Panel: LIVE provider switching. The dropdowns read and write the server's
+// /api/settings — the choice is persisted server-side (dev-settings.json)
+// and takes effect on the next pipeline run, no restart needed. Plus a
+// token/usage ledger fed by app.js after each processing pass.
 
 const PASS_SHA256 = 'c89460af16840ba1f4c48913140ff70cd8ca805e6b4707b807c5261d0f595e29';
 const UNLOCKED_KEY = 'lc.devUnlocked'; // sessionStorage — relocks on tab close
-const ENDPOINTS_KEY = 'lc.devEndpoints';
 const USAGE_KEY = 'lc.usage';
-
-// Pipeline roles and their current (assumed) providers. `rate` is an
-// editable $-per-unit estimate; blank = no cost estimate shown.
-const DEFAULT_ENDPOINTS = [
-  {
-    id: 'transcription',
-    role: 'Transcription — live captions',
-    provider: 'Google Web Speech API',
-    model: 'chrome built-in',
-    route: 'browser · real-time',
-    unit: 'min',
-    rate: '0',
-  },
-  {
-    id: 'tone-timing',
-    role: 'Tone & timing — precision pass',
-    provider: 'OpenAI Whisper',
-    model: 'whisper-1',
-    route: 'POST /api/transcribe',
-    unit: 'min',
-    rate: '0.006',
-  },
-  {
-    id: 'content',
-    role: 'Content analysis — goals, accuracy & summary',
-    provider: 'Anthropic Claude',
-    model: 'claude-opus-4-8',
-    route: 'POST /api/factcheck',
-    unit: 'tokens',
-    rate: '',
-  },
-];
 
 const $ = (id) => document.getElementById(id);
 
@@ -54,20 +22,7 @@ async function sha256Hex(text) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ------------------------------------------------------------ persistence
-
-function loadEndpoints() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(ENDPOINTS_KEY) || '[]');
-    return DEFAULT_ENDPOINTS.map((d) => ({ ...d, ...(saved.find((s) => s.id === d.id) || {}) }));
-  } catch {
-    return structuredClone(DEFAULT_ENDPOINTS);
-  }
-}
-
-function saveEndpoints(endpoints) {
-  localStorage.setItem(ENDPOINTS_KEY, JSON.stringify(endpoints));
-}
+// ------------------------------------------------------------ usage ledger
 
 function loadUsage() {
   try {
@@ -79,7 +34,7 @@ function loadUsage() {
 }
 
 /** Called from app.js after each processing pass.
- * entry: { role, provider, model, minutes?, inputTokens?, outputTokens?, note? } */
+ * entry: { role, provider, model, minutes?, inputTokens?, outputTokens?, costUSD? } */
 export function logUsage(entry) {
   const usage = loadUsage();
   usage.push({ ts: new Date().toISOString().slice(0, 16), ...entry });
@@ -136,52 +91,83 @@ async function showPanel() {
 async function renderPanel() {
   const panel = $('dev-panel');
 
-  let status = null;
+  let cfg = null;
   try {
-    status = await (await fetch('/api/status')).json();
+    cfg = await (await fetch('/api/settings')).json();
   } catch {
     /* server unreachable */
   }
 
-  const endpoints = loadEndpoints();
   const usage = loadUsage();
-  const totals = usageTotals(usage, endpoints);
+  const totals = usageTotals(usage);
 
-  const statusLed = (ok) =>
-    `<span class="led ${ok ? 'lit-green' : ''}" title="${ok ? 'configured' : 'not configured'}"></span>`;
-  const keyState = (id) =>
-    id === 'transcription' ? true
-    : id === 'tone-timing' ? !!status?.whisperConfigured
-    : !!status?.claudeConfigured;
+  if (!cfg) {
+    panel.innerHTML = `<p class="dim-note">Server unreachable — provider switching needs the Node server running.</p>`;
+    return;
+  }
+
+  const led = (ok) =>
+    `<span class="led ${ok ? 'lit-green' : ''}" title="${ok ? 'API key configured' : 'no API key — set its env var'}"></span>`;
+
+  const tOpts = (selected) =>
+    cfg.transcriptionProviders
+      .map((p) => `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${esc(p.label)}${p.configured ? '' : ' — no key'}</option>`)
+      .join('');
+  const mOpts = (selected) =>
+    cfg.analysisModels
+      .map((m) => `<option value="${m.id}" ${m.id === selected ? 'selected' : ''}>${esc(m.label)} · $${m.pricing.inPerM}/$${m.pricing.outPerM} per M${m.approxPricing ? '≈' : ''}${m.configured ? '' : ' — no key'}</option>`)
+      .join('');
+
+  const tSel = cfg.transcriptionProviders.find((p) => p.id === cfg.settings.transcriptionProvider);
+  const fSel = cfg.analysisModels.find((m) => m.id === cfg.settings.factcheckModelId);
+  const dSel = cfg.analysisModels.find((m) => m.id === cfg.settings.deepAnalysisModelId);
 
   panel.innerHTML = `
-    <p class="dim-note">API keys live only in Render environment variables (<code>OPENAI_API_KEY</code>,
-    <code>ANTHROPIC_API_KEY</code>) and never reach this browser. Server fact-check model:
-    <code>${esc(status?.factcheckModel || 'server offline')}</code></p>
+    <p class="dim-note">API keys live only in server environment variables
+    (<code>OPENAI_API_KEY</code>, <code>ASSEMBLYAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>,
+    <code>DEEPSEEK_API_KEY</code>, <code>MOONSHOT_API_KEY</code>) and never reach this browser.
+    Selections below are saved on the server and apply to the next run — no restart needed.</p>
 
     <div class="dev-endpoints">
-      ${endpoints.map((ep) => `
-        <div class="dev-endpoint" data-id="${ep.id}">
-          <div class="dev-ep-head">${statusLed(keyState(ep.id))}<strong>${esc(ep.role)}</strong>
-            <span class="dev-route mono">${esc(ep.route)}</span></div>
-          <div class="dev-ep-fields">
-            <label>provider<input data-field="provider" value="${esc(ep.provider)}"></label>
-            <label>model<input data-field="model" value="${esc(ep.model)}"></label>
-            <label>$ / ${ep.unit === 'min' ? 'audio min' : '1K tokens'}<input data-field="rate" value="${esc(ep.rate)}" placeholder="—"></label>
-          </div>
-        </div>`).join('')}
-    </div>
-    <p class="dim-note">Provider/model fields are a skeleton for the future endpoint-swap feature —
-    edits persist locally but the server routes are governed by its environment variables today.</p>
+      <div class="dev-endpoint">
+        <div class="dev-ep-head">${led(true)}<strong>Transcription — live captions</strong>
+          <span class="dev-route mono">browser · real-time · free</span></div>
+        <div class="dev-ep-fields"><span class="dim-note">Google Web Speech (Chrome built-in) — not swappable; it feeds the live dashboard only.</span></div>
+      </div>
 
-    <div class="dev-deploy-note">
-      <strong>Before publishing / going wider:</strong>
-      Two suggestions when you deploy: (1) consider Render's "secret files" if you ever need more
-      than two keys, and (2) if the app ever gets a public URL, add a shared secret header check on
-      /api/transcribe//api/factcheck so strangers can't run up your bill — the dev panel would be
-      the natural place to enter it. The ledger is also localStorage-per-browser; if you want usage
-      tracked across machines, that needs a tiny server-side counter later.
+      <div class="dev-endpoint">
+        <div class="dev-ep-head">${led(!!tSel?.configured)}<strong>Transcription — precision pass</strong>
+          <span class="dev-route mono">POST /api/transcribe</span></div>
+        <div class="dev-ep-fields">
+          <label>provider
+            <select data-key="transcriptionProvider">${tOpts(cfg.settings.transcriptionProvider)}</select>
+          </label>
+          <span class="dim-note">~$${((tSel?.costPerMin ?? 0) * 60).toFixed(2)}/hr${tSel?.approxPricing ? ' (approx.)' : ''}</span>
+        </div>
+      </div>
+
+      <div class="dev-endpoint">
+        <div class="dev-ep-head">${led(!!fSel?.configured)}<strong>Quick fact-check — runs every session</strong>
+          <span class="dev-route mono">POST /api/factcheck</span></div>
+        <div class="dev-ep-fields">
+          <label>model
+            <select data-key="factcheckModelId">${mOpts(cfg.settings.factcheckModelId)}</select>
+          </label>
+        </div>
+      </div>
+
+      <div class="dev-endpoint">
+        <div class="dev-ep-head">${led(!!dSel?.configured)}<strong>Deep analysis — manual, button-triggered only</strong>
+          <span class="dev-route mono">POST /api/deep-analysis</span></div>
+        <div class="dev-ep-fields">
+          <label>model
+            <select data-key="deepAnalysisModelId">${mOpts(cfg.settings.deepAnalysisModelId)}</select>
+          </label>
+        </div>
+      </div>
     </div>
+    <p class="dim-note">Prices marked ≈ are editable estimates in <code>providers/catalog.js</code> —
+    check the provider's pricing page. To add a provider or model, add a catalog entry and its key.</p>
 
     <div class="dev-usage-head">
       <strong>Usage ledger</strong>
@@ -196,18 +182,23 @@ async function renderPanel() {
             <td>${esc(u.ts)}</td><td>${esc(u.role)}</td><td>${esc(u.model || '')}</td>
             <td class="num">${u.inputTokens ?? ''}</td><td class="num">${u.outputTokens ?? ''}</td>
             <td class="num">${u.minutes != null ? u.minutes.toFixed(1) : ''}</td>
-            <td class="num">${fmtCost(estCost(u, endpoints))}</td>
+            <td class="num">${fmtCost(estCost(u))}</td>
           </tr>`).join('') || '<tr><td colspan="7" class="empty-state">No AI calls logged yet.</td></tr>'}
       </table>
     </div>`;
 
-  panel.querySelectorAll('.dev-endpoint input').forEach((input) => {
-    input.addEventListener('change', () => {
-      const eps = loadEndpoints();
-      const ep = eps.find((x) => x.id === input.closest('.dev-endpoint').dataset.id);
-      ep[input.dataset.field] = input.value.trim();
-      saveEndpoints(eps);
-      renderPanel(); // refresh totals with new rates
+  panel.querySelectorAll('select[data-key]').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      try {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [sel.dataset.key]: sel.value }),
+        });
+      } catch {
+        /* leave the UI as-is; re-render below shows server truth */
+      }
+      renderPanel();
     });
   });
 
@@ -221,22 +212,23 @@ async function renderPanel() {
 
 // ------------------------------------------------------------ usage math
 
-function estCost(u, endpoints) {
-  const ep = endpoints.find((e) => e.role === u.role || e.id === u.role);
-  const rate = parseFloat(ep?.rate);
-  if (!ep || Number.isNaN(rate)) return null;
-  if (ep.unit === 'min') return u.minutes != null ? u.minutes * rate : null;
-  const tokens = (u.inputTokens ?? 0) + (u.outputTokens ?? 0);
-  return tokens ? (tokens / 1000) * rate : null;
+// Legacy per-role rates for ledger entries logged before costUSD existed.
+const LEGACY_RATES = { 'tone-timing': 0.006 }; // $/audio-min
+
+function estCost(u) {
+  if (u.costUSD != null) return u.costUSD;
+  const rate = LEGACY_RATES[u.role];
+  if (rate != null && u.minutes != null) return u.minutes * rate;
+  return null;
 }
 
-function usageTotals(usage, endpoints) {
+function usageTotals(usage) {
   let inTok = 0, outTok = 0, minutes = 0, cost = 0, costKnown = false;
   for (const u of usage) {
     inTok += u.inputTokens ?? 0;
     outTok += u.outputTokens ?? 0;
     minutes += u.minutes ?? 0;
-    const c = estCost(u, endpoints);
+    const c = estCost(u);
     if (c != null) { cost += c; costKnown = true; }
   }
   return {

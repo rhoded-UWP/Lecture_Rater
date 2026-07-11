@@ -1,10 +1,21 @@
 {
   "id": "intro-python",
-  "title": "Intro to Python",
+  "title": "CS1430 - Intro to Programming",
   "subject": "Python programming for first-time programmers",
   "level": "intro",
   "strictness": "Flag statements that are wrong, and oversimplifications likely to cause misconceptions later. Do not flag reasonable pedagogical simplification.",
   "topics": ["variables", "types", "strings", "input/print", "conditionals", "loops", "functions", "lists"],
+  "learningOutcomes": [
+    "Develop algorithms to solve \"computer-solvable\" problems",
+    "Translate algorithms to computer programs",
+    "Apply the concepts of identifiers and datatypes",
+    "Program control structures such as sequential, branch, and loop",
+    "Perform basic operations on strings",
+    "Perform basic operations using Lists",
+    "Implement modular programs using objects and functions",
+    "Understand how to use a debugger to debug errors in a program",
+    "Recognize the basic concepts of classes and objects"
+  ],
   "misconceptionTraps": [
     "Confusing = (assignment) with == (comparison)",
     "Saying variables 'store' values vs. referencing objects — fine at intro level, don't flag",

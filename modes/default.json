@@ -5,5 +5,6 @@
   "level": "any",
   "strictness": "First infer the subject area and audience level from the transcript. Then flag statements that are factually wrong, and oversimplifications likely to cause misconceptions later. Do not flag reasonable pedagogical simplification for the inferred level. Check dates, names, numbers, definitions, causal claims, and technical assertions against established knowledge in the inferred discipline.",
   "topics": [],
+  "learningOutcomes": [],
   "misconceptionTraps": []
 }

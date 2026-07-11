@@ -13,13 +13,30 @@ npm start          # http://localhost:3000 — open in Chrome
 ```
 
 Without API keys the app is fully usable (Phase 1: live dashboard, live-data report, history).
-To enable the precision + fact-check passes, set environment variables (locally or in Render):
+To enable the AI passes, copy `.env.example` to `.env` and paste in whichever keys you have
+(`npm start` loads `.env` automatically; on Render, set the same names as environment variables):
 
 | Variable | Enables |
 |---|---|
 | `OPENAI_API_KEY` | Whisper precision transcript, stutter/restart detection |
-| `ANTHROPIC_API_KEY` | Claude fact-check / accuracy score |
-| `FACTCHECK_MODEL` | Optional — defaults to `claude-haiku-4-5-20251001` |
+| `ANTHROPIC_API_KEY` | Claude fact-check + deep analysis |
+| `ASSEMBLYAI_API_KEY` | AssemblyAI as an alternative transcription provider |
+| `DEEPSEEK_API_KEY` | DeepSeek as an alternative (budget) analysis provider |
+| `MOONSHOT_API_KEY` | Kimi K2 as an alternative analysis provider |
+
+A missing key just greys that provider out in the dev panel — nothing breaks.
+
+### Swappable AI providers
+
+Every AI endpoint is swappable at runtime from **⚙ Developer Tools** (bottom-left) — no restart:
+
+- **Transcription — precision pass:** OpenAI Whisper or AssemblyAI
+- **Quick fact-check** (runs automatically each session): any model in the catalog — default Claude Haiku 4.5 (cheap)
+- **Deep analysis** (manual button, paid): any model in the catalog — default Claude Opus 4.8 (best)
+
+The catalog lives in `providers/catalog.js` — add a provider/model there (plus its key) and it
+appears in the dev panel. Choices persist server-side in `dev-settings.json` (gitignored).
+DeepSeek and Kimi share one OpenAI-compatible adapter, so most new chat APIs are a catalog entry away.
 
 ---
 
@@ -227,9 +244,11 @@ Rehearsal mode has no such concerns — it's just you.
 | `GET /api/status` | Key/ffmpeg configuration state (never returns secrets) |
 | `POST /api/transcribe` | Receives session audio → Whisper → returns word-timestamped transcript → **deletes audio** |
 | `POST /api/transcribe-video` | Testing pipeline: MP4 upload → ffmpeg strips a small mono audio track (**video deleted immediately**, audio deleted after read) → Whisper → word-timestamped transcript |
-| `POST /api/factcheck` | Receives transcript + mode id → Claude → returns accuracy flags |
+| `POST /api/factcheck` | Receives transcript + mode id → active fact-check model → returns accuracy flags |
+| `GET/POST /api/settings` | Dev panel provider switching: active providers + catalog with pricing (never returns secrets) |
+| `POST /api/deep-analysis` | **Manual, paid pass** — transcript + mode + objectives/outcomes → active deep-analysis model → content review, per-outcome alignment (covered/partial/missed with timestamps + minutes), coaching suggestions |
 
-Everything else — live transcription, tone analysis, metrics, scoring, storage — happens in the browser. API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) live in Render environment variables and never reach the client.
+Everything else — live transcription, tone analysis, metrics, scoring, storage — happens in the browser. API keys live in server environment variables (or `.env` locally) and never reach the client.
 
 **Estimated running cost:** a 50-minute lecture ≈ $0.30 (Whisper) + a few cents (Claude, using a small model like Haiku for the fact-check pass). Well under $1/lecture.
 

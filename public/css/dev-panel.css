@@ -136,3 +136,17 @@
 @media (max-width: 640px) {
   .dev-ep-fields { grid-template-columns: 1fr; }
 }
+
+/* provider-swap dropdowns (server-backed /api/settings) */
+.dev-ep-fields select {
+  width: 100%;
+  margin-top: 3px;
+  background: #0d1014;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 6px 8px;
+}
+.dev-ep-fields select:focus { outline: 2px solid var(--amber); outline-offset: 1px; }

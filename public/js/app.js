@@ -32,6 +32,39 @@ let live = null;            // { metrics, speech, energy, recorder, stream, time
 let currentSession = null;  // report currently displayed
 let currentSessionSaved = false;
 
+// ============================================================ AI settings
+// Server-side provider configuration (/api/settings): which transcription
+// provider and analysis models are active, plus pricing for cost estimates.
+// Cached; the dev panel writes changes server-side, so refresh before use
+// where the price matters.
+
+let aiSettings = null;
+
+async function fetchAiSettings(force = false) {
+  if (aiSettings && !force) return aiSettings;
+  try {
+    aiSettings = await (await fetch('/api/settings')).json();
+  } catch {
+    /* server offline — estimates just won't show */
+  }
+  return aiSettings;
+}
+
+/** Ledger entry for a completed precision-transcription pass. The server
+ * reports which provider actually ran (data.provider/model). */
+async function logTranscriptionUsage(data, minutes, note) {
+  const cfg = await fetchAiSettings();
+  const p = cfg?.transcriptionProviders?.find((x) => x.label === data.provider);
+  logUsage({
+    role: 'tone-timing',
+    provider: data.provider || 'transcription',
+    model: data.model || '',
+    minutes,
+    costUSD: p ? Math.round(minutes * p.costPerMin * 10000) / 10000 : null,
+    ...(note ? { note } : {}),
+  });
+}
+
 // ============================================================ view routing
 
 function showView(name) {
@@ -254,10 +287,16 @@ function wireObjectivesUpload(input, textarea, persist) {
   });
 }
 
-/** Course outcomes are stored per mode; swap them in when the mode changes. */
+/** Course outcomes are stored per mode; swap them in when the mode changes.
+ * If the instructor hasn't saved custom outcomes for this mode, the box
+ * pre-fills from the mode file's learningOutcomes (so CS1010/CS1430 show
+ * their official course outcomes on selection). Edits stick per browser;
+ * clearing the box restores the mode-file defaults on next selection. */
 function loadOutcomesForMode(modeId) {
-  $('course-outcomes').value = localStorage.getItem(outcomesKey(modeId)) || '';
-  $('slo-mode-tag').textContent = `· ${modes.find((m) => m.id === modeId)?.title || modeId}`;
+  const mode = modes.find((m) => m.id === modeId);
+  const saved = localStorage.getItem(outcomesKey(modeId));
+  $('course-outcomes').value = saved || (mode?.learningOutcomes || []).join('\n');
+  $('slo-mode-tag').textContent = `· ${mode?.title || modeId}`;
 }
 
 $('settings-reset').addEventListener('click', () => {
@@ -685,12 +724,7 @@ async function endSession() {
         if (sessionType === 'live') applyPrivacyExclusion(session);
       }
       session.precision = true;
-      logUsage({
-        role: 'tone-timing',
-        provider: 'OpenAI Whisper',
-        model: 'whisper-1',
-        minutes: Math.round(((data.durationSec ?? session.lectureSec) / 60) * 10) / 10,
-      });
+      await logTranscriptionUsage(data, Math.round(((data.durationSec ?? session.lectureSec) / 60) * 10) / 10);
       setProc('proc-transcribe', 'done', 'word-level transcript ready');
     } catch (err) {
       setProc('proc-transcribe', 'skipped', `skipped — ${err.message}`);
@@ -725,10 +759,11 @@ async function factcheckAndScore(session) {
       if (data.usage) {
         logUsage({
           role: 'content',
-          provider: 'Anthropic Claude',
+          provider: data.provider || 'analysis',
           model: data.model,
           inputTokens: data.usage.inputTokens,
           outputTokens: data.usage.outputTokens,
+          costUSD: data.costUSD ?? null,
         });
       }
       setProc('proc-factcheck', 'done', `${data.flags.length} flag${data.flags.length === 1 ? '' : 's'}`);
@@ -808,7 +843,7 @@ async function runUploadSession(file) {
     nonlectureSec,
     scores: null,
     timeline: {
-      wpm: rebuildWpmTimeline(data.words, durationSec),
+      wpm: rebuildUploadWpm(data.words, nonlecture, durationSec - nonlectureSec),
       energy: [], // vocal energy is not computed for uploads (v1) — renormalized out
       attention: [],
       nonlecture,
@@ -834,13 +869,7 @@ async function runUploadSession(file) {
     session.timeline.attention.push([t, Math.round(estimateAttention(t / 60, blocksMin).score)]);
   }
 
-  logUsage({
-    role: 'tone-timing',
-    provider: 'OpenAI Whisper',
-    model: 'whisper-1',
-    minutes: Math.round((durationSec / 60) * 10) / 10,
-    note: `upload: ${file.name}`,
-  });
+  await logTranscriptionUsage(data, Math.round((durationSec / 60) * 10) / 10, `upload: ${file.name}`);
 
   await factcheckAndScore(session);
 }
@@ -878,6 +907,24 @@ function rebuildWpmTimeline(words, durationSec) {
     timeline.push([t, Math.round((n * 60) / win)]);
   }
   return timeline;
+}
+
+/** Upload path: WPM windows must not span inferred nonlecture (silence)
+ * blocks, or samples near a block read artificially low. Rebuild on the
+ * lecture clock (silences removed), then stamp the samples back in session
+ * time for the charts. */
+function rebuildUploadWpm(words, nonlecture, lectureDurationSec) {
+  const toLecture = (s) => {
+    let off = 0;
+    for (const [a, b] of nonlecture) {
+      if (s >= b) off += b - a;
+      else if (s > a) off += s - a; // inside a block — clamp to its start
+    }
+    return s - off;
+  };
+  const lectureWords = words.map((w) => ({ start: toLecture(w.start) }));
+  const toSession = makeRecordedToSession(nonlecture);
+  return rebuildWpmTimeline(lectureWords, lectureDurationSec).map(([t, v]) => [Math.round(toSession(t)), v]);
 }
 
 /** Recording pauses during nonlecture blocks, so a recorded timestamp lags
@@ -1057,9 +1104,153 @@ function renderReport(session) {
          <ul class="obj-list">${outcomes.map((o) => `<li>${esc(o)}</li>`).join('')}</ul>`
       : '');
 
+  renderDeepAnalysis(session);
   renderAnnotatedTranscript(session);
   $('save-session-btn').textContent = currentSessionSaved ? 'Saved ✓' : 'Save Session';
   $('save-session-btn').disabled = currentSessionSaved;
+}
+
+// ============================================================ deep analysis
+// The paid, on-demand pass: thorough content review + learning-outcome
+// alignment. NEVER automatic — the instructor clicks the button, sees an
+// estimated cost first, and the result is stored on the session (so it
+// persists with Save Session and re-renders from History).
+
+async function renderDeepAnalysis(session) {
+  const body = $('deep-analysis-body');
+
+  if (session.deepAnalysis) {
+    body.innerHTML = deepAnalysisHtml(session.deepAnalysis) +
+      `<div class="da-actions"><button class="btn subtle" id="deep-run-btn">Re-run deep analysis</button>
+       <span class="dim-note" id="deep-run-note"></span></div>`;
+    hookDeepRun(session);
+    return;
+  }
+
+  if (!session.transcript?.length) {
+    body.innerHTML = `<p class="dim-note">Deep analysis needs a transcript — none was captured for this session.</p>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <p class="dim-note">Runs a thorough content review plus alignment against your lecture objectives and
+    course learning outcomes. Uses paid API credits — nothing runs until you click.</p>
+    <div class="da-actions">
+      <button class="btn primary" id="deep-run-btn">Run Deep Analysis</button>
+      <span class="dim-note" id="deep-run-note">estimating cost…</span>
+    </div>`;
+  hookDeepRun(session);
+
+  // fill in the estimate asynchronously (server may be offline — fail soft)
+  const est = await deepCostEstimate(session);
+  const note = $('deep-run-note');
+  if (note) note.textContent = est ? `~$${est.cost.toFixed(2)} estimated · ${est.modelLabel}` : 'cost estimate unavailable (server offline?)';
+}
+
+function hookDeepRun(session) {
+  $('deep-run-btn')?.addEventListener('click', () => runDeepAnalysis(session));
+}
+
+/** Rough pre-run estimate: chars/4 ≈ tokens, plus prompt overhead and a
+ * typical response size, priced from the active deep-analysis model. */
+async function deepCostEstimate(session) {
+  const cfg = await fetchAiSettings(true); // refresh — dev panel may have switched models
+  const m = cfg?.analysisModels?.find((x) => x.id === cfg.settings.deepAnalysisModelId);
+  if (!m) return null;
+  const chars = session.transcript.reduce((s, seg) => s + seg.text.length + 10, 0);
+  const inTok = Math.round(chars / 4) + 1500;
+  const outTok = 2500;
+  const cost = (inTok / 1e6) * m.pricing.inPerM + (outTok / 1e6) * m.pricing.outPerM;
+  return { cost: Math.max(cost, 0.01), modelLabel: m.label + (m.approxPricing ? ' (approx. pricing)' : '') };
+}
+
+async function runDeepAnalysis(session) {
+  const btn = $('deep-run-btn');
+  const note = $('deep-run-note');
+  btn.disabled = true;
+  note.textContent = 'analyzing… this can take 30–120 s';
+
+  try {
+    const payload = factcheckTranscript(session); // same privacy filtering as the quick pass
+    if (!payload.length) throw new Error('no transcript to analyze');
+    const r = await fetch('/api/deep-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transcript: payload,
+        modeId: session.mode,
+        lectureObjectives: session.learningObjectives || [],
+        courseOutcomes: session.courseOutcomes || [],
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+
+    session.deepAnalysis = {
+      ...data.analysis,
+      model: data.model,
+      provider: data.provider,
+      usage: data.usage,
+      costUSD: data.costUSD,
+      ranAt: new Date().toISOString().slice(0, 16),
+    };
+    logUsage({
+      role: 'deep-analysis',
+      provider: data.provider,
+      model: data.model,
+      inputTokens: data.usage?.inputTokens,
+      outputTokens: data.usage?.outputTokens,
+      costUSD: data.costUSD ?? null,
+    });
+
+    // the session changed — let the instructor re-save it with the analysis
+    if (session === currentSession) {
+      currentSessionSaved = false;
+      $('save-session-btn').textContent = 'Save Session';
+      $('save-session-btn').disabled = false;
+    }
+    renderDeepAnalysis(session);
+  } catch (err) {
+    btn.disabled = false;
+    note.textContent = `failed — ${err.message}`;
+  }
+}
+
+function deepAnalysisHtml(da) {
+  const statusChip = (s) => `<span class="da-chip ${esc(s)}">${esc(s)}</span>`;
+  const scopeTag = (s) => `<span class="da-scope mono">${esc(s)}</span>`;
+
+  const objectives = (da.objectives || []).map((o) => `
+    <div class="da-obj ${esc(o.status)}">
+      <div class="da-obj-head">${statusChip(o.status)} ${scopeTag(o.scope || '')}
+        <strong>${esc(o.text)}</strong>
+        ${o.minutes != null ? `<span class="da-min mono">~${Math.round(o.minutes)} min</span>` : ''}
+      </div>
+      ${(o.evidence || []).length
+        ? `<div class="da-evidence">${o.evidence.map((e) => `<span class="mono">${fmtClock(e.t || 0)}</span> ${esc(e.note)}`).join(' · ')}</div>`
+        : ''}
+      ${o.comment ? `<div class="da-comment">${esc(o.comment)}</div>` : ''}
+    </div>`).join('');
+
+  const findings = (da.contentFindings || []).length
+    ? da.contentFindings.map((f) => `
+        <div class="acc-flag ${esc(f.severity)}">
+          <blockquote>“${esc(f.quote)}”</blockquote>
+          <div class="acc-exp"><span class="sev">${esc(f.severity)}</span><span class="t mono">${fmtClock(f.t || 0)}</span> ${esc(f.explanation)}</div>
+        </div>`).join('')
+    : `<p class="dim-note" style="color:var(--green)">No content issues found in the deep review.</p>`;
+
+  return `
+    <div class="da-meta mono dim">ran ${esc(da.ranAt || '')} · ${esc(da.provider || '')} ${esc(da.model || '')}
+      ${da.costUSD != null ? `· actual cost $${da.costUSD.toFixed(da.costUSD < 0.1 ? 3 : 2)}` : ''}
+      ${da.usage ? `· ${da.usage.inputTokens} in / ${da.usage.outputTokens} out tokens` : ''}</div>
+    ${da.summary ? `<p class="da-summary">${esc(da.summary)}</p>` : ''}
+    ${objectives ? `<div class="da-section-title">Objective &amp; outcome alignment</div>${objectives}` : ''}
+    <div class="da-section-title">Deep content review</div>${findings}
+    ${(da.suggestions || []).length
+      ? `<div class="da-section-title">Coaching suggestions</div>
+         <ul class="da-suggestions">${da.suggestions.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>`
+      : ''}`;
 }
 
 function drawReportCharts(session) {

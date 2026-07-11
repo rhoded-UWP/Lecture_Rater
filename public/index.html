@@ -103,7 +103,7 @@
               <textarea id="course-outcomes" rows="3" placeholder="one outcome per line — saved per mode"></textarea>
               <label class="btn subtle upload-label">Upload .txt / .json<input type="file" id="outcomes-file" accept=".txt,.md,.json" hidden></label>
             </div>
-            <p class="dim-note">Stored locally and attached to each saved session. A future phase will use AI to measure time spent per objective and how accurately related content was relayed — per lecture and across the course.</p>
+            <p class="dim-note">Stored locally and attached to each saved session. After a session, the report's <strong>Deep Analysis</strong> button (manual, uses paid API credits) measures coverage and accuracy per objective. Course-level outcomes can also live in the mode file (<code>learningOutcomes</code>).</p>
           </div>
 
           <details class="module settings-module" id="settings-panel">
@@ -273,7 +273,11 @@
         <div class="module span2 hidden" id="objectives-module">
           <div class="module-label"><span class="led"></span>Learning Objectives &amp; Outcomes</div>
           <div id="objectives-report"></div>
-          <p class="dim-note">AI coverage analysis — time per objective and accuracy of related content, per lecture and across the course — is planned for a future phase.</p>
+          <p class="dim-note">Run Deep Analysis below to measure coverage, time per objective, and accuracy of related content.</p>
+        </div>
+        <div class="module span2" id="deep-analysis-module">
+          <div class="module-label"><span class="led"></span>Deep Analysis — Content &amp; Outcome Alignment</div>
+          <div id="deep-analysis-body"></div>
         </div>
         <div class="module span2">
           <div class="module-label"><span class="led"></span>Annotated Transcript</div>

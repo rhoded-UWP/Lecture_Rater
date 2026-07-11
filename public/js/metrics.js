@@ -71,23 +71,40 @@ export class SessionMetrics {
     return this.now() - (lastEnd ?? 0);
   }
 
-  /** Rolling words-per-minute over the configured window. */
+  /** Wall clock → lecture clock: lecture seconds elapsed at wall time w.
+   * Monotone (flat across nonlecture blocks), so rolling windows measured on
+   * it span lecture time only — a nonlecture block doesn't dilute the rate. */
+  lectureTimeAt(w) {
+    // Sum only the part of each block that overlaps [0, w] — nonlectureSec()
+    // can't be reused here: it assumes `at` is later than every block, which
+    // is false when mapping historical word timestamps.
+    let nl = 0;
+    for (const b of this.nonlecture) {
+      nl += Math.max(0, Math.min(b.end ?? w, w) - b.start);
+    }
+    return w - nl;
+  }
+
+  /** Rolling words-per-minute over the configured window of LECTURE time.
+   * Wall-clock windows would read near-zero for a full window after each
+   * nonlecture block (the window mostly covering silence); measuring the
+   * window on the lecture clock resumes at the pre-activity pace instead. */
   currentWpm() {
-    const t = this.now();
-    const windowSec = Math.max(15, Math.min(this.settings.wpmWindowSec, t));
-    if (t < 5) return 0;
-    const cutoff = t - windowSec;
+    const lNow = this.lectureTimeAt(this.now());
+    if (lNow < 5) return 0;
+    const windowSec = Math.max(15, Math.min(this.settings.wpmWindowSec, lNow));
+    const cutoff = lNow - windowSec;
     let n = 0;
-    for (let i = this.words.length - 1; i >= 0 && this.words[i].t >= cutoff; i--) n++;
+    for (let i = this.words.length - 1; i >= 0 && this.lectureTimeAt(this.words[i].t) >= cutoff; i--) n++;
     return Math.round((n * 60) / windowSec);
   }
 
-  /** Fillers per minute over the last 3 minutes (or session so far). */
+  /** Fillers per minute over the last 3 minutes of lecture time. */
   currentFillerRate() {
-    const t = this.now();
-    const windowSec = Math.max(30, Math.min(180, t));
-    const cutoff = t - windowSec;
-    const n = this.fillers.filter((f) => f.t >= cutoff).length;
+    const lNow = this.lectureTimeAt(this.now());
+    const windowSec = Math.max(30, Math.min(180, lNow));
+    const cutoff = lNow - windowSec;
+    const n = this.fillers.filter((f) => this.lectureTimeAt(f.t) >= cutoff).length;
     return (n * 60) / windowSec;
   }
 
