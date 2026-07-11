@@ -1,4 +1,4 @@
-# Lecture Coach
+# Lecture Rater
 
 A web app that listens to you teach — live in the classroom or in rehearsal — and coaches your lecture delivery. It transcribes as you speak, tracks pace, filler words, stutters, and vocal energy, graphs continuous lecture time between nonlecture activities, and fact-checks what you told them afterward.
 

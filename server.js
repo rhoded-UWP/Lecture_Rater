@@ -1,4 +1,4 @@
-// Lecture Coach — Express server.
+// Lecture Rater — Express server.
 // Serves the static front end plus the API routes. All session state lives
 // in the browser; this server holds nothing except dev-settings.json (which
 // provider/model each pipeline role uses). Audio is received in memory,
@@ -400,7 +400,7 @@ function toSeconds(t) {
 app.listen(PORT, () => {
   const s = getSettings();
   const flag = (envKey) => (process.env[envKey] ? 'key set' : `NOT configured (set ${envKey})`);
-  console.log(`Lecture Coach on http://localhost:${PORT}`);
+  console.log(`Lecture Rater on http://localhost:${PORT}`);
   console.log(`  Transcription:  ${s.transcriptionProvider} — OpenAI ${flag('OPENAI_API_KEY')} · AssemblyAI ${flag('ASSEMBLYAI_API_KEY')}`);
   console.log(`  Fact-check:     ${s.factcheckModelId} — Anthropic ${flag('ANTHROPIC_API_KEY')}`);
   console.log(`  Deep analysis:  ${s.deepAnalysisModelId} — DeepSeek ${flag('DEEPSEEK_API_KEY')} · Moonshot ${flag('MOONSHOT_API_KEY')}`);

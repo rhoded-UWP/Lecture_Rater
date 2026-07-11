@@ -1,5 +1,5 @@
 {
-  "name": "lecture-coach",
+  "name": "lecture-rater",
   "version": "0.1.0",
   "description": "A coach for lecturing — live delivery metrics, precision transcription, and fact-checking.",
   "type": "module",

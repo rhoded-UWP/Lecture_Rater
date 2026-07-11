@@ -43,7 +43,7 @@ export function importSessionFile(file) {
   return file.text().then((text) => {
     const session = JSON.parse(text);
     if (!session.sessionId || !session.scores || !session.timeline) {
-      throw new Error('Not a Lecture Coach session file.');
+      throw new Error('Not a Lecture Rater session file.');
     }
     return session;
   });

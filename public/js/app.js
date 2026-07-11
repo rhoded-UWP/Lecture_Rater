@@ -1,4 +1,4 @@
-// Lecture Coach — application orchestrator.
+// Lecture Rater — application orchestrator.
 // Views: setup → live → processing → report, plus history.
 
 import { loadSettings, saveSettings, activeFillerList, DEFAULTS, PACE_PROFILES, PACE_ZONES, classifyWpm } from './config.js';
