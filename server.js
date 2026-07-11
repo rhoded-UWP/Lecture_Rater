@@ -130,14 +130,15 @@ app.post('/api/factcheck', async (req, res) => {
   const stamp = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
   const transcriptText = transcript.map((s) => `[${stamp(s.t)}] ${s.text}`).join('\n');
 
+  const topicsLine = mode.topics?.length ? `\nTopics: ${mode.topics.join(', ')}` : '';
+  const trapsBlock = mode.misconceptionTraps?.length
+    ? `\nKnown misconception traps to watch for:\n${mode.misconceptionTraps.map((m) => `- ${m}`).join('\n')}`
+    : '';
   const prompt = `You are fact-checking a recorded lecture for the instructor's own coaching. Course context:
 
 Subject: ${mode.subject}
-Level: ${mode.level}
-Topics: ${(mode.topics || []).join(', ')}
-Strictness policy: ${mode.strictness}
-Known misconception traps to watch for:
-${(mode.misconceptionTraps || []).map((m) => `- ${m}`).join('\n')}
+Level: ${mode.level}${topicsLine}
+Strictness policy: ${mode.strictness}${trapsBlock}
 
 Review the lecture transcript below. Flag only factual errors and oversimplifications likely to cause misconceptions later, per the strictness policy. Reasonable pedagogical simplification is fine. The transcript is machine-generated, so ignore transcription artifacts and garbled words.
 

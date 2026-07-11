@@ -1,10 +1,9 @@
 {
   "id": "default",
-  "title": "Default — No Content Check",
-  "subject": "Any subject — delivery metrics only, no fact-checking",
+  "title": "Default — Any Subject",
+  "subject": "Any subject — detailed content check with the discipline inferred from the lecture itself",
   "level": "any",
-  "factcheck": false,
-  "strictness": "Not applicable — this mode never runs the fact-check pass.",
+  "strictness": "First infer the subject area and audience level from the transcript. Then flag statements that are factually wrong, and oversimplifications likely to cause misconceptions later. Do not flag reasonable pedagogical simplification for the inferred level. Check dates, names, numbers, definitions, causal claims, and technical assertions against established knowledge in the inferred discipline.",
   "topics": [],
   "misconceptionTraps": []
 }

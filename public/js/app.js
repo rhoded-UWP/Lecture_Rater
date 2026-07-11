@@ -79,7 +79,7 @@ async function initSetup() {
     });
     list.appendChild(card);
   }
-  // Pre-select "Default — No Content Check" so the console is armed on load;
+  // Pre-select the "Default — Any Subject" mode so the console is armed on load;
   // fall back to the first mode if it's ever removed.
   const defaultIdx = Math.max(0, modes.findIndex((m) => m.id === 'default'));
   if (modes.length) list.querySelectorAll('.mode-card')[defaultIdx]?.click();
