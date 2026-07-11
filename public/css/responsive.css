@@ -16,39 +16,52 @@
    monitor on the right; every readout scales up for across-the-classroom
    glanceability. */
 @media (min-width: 1600px) {
-  .live-grid {
-    grid-template-columns: 1fr 1fr 1.55fr;
-    grid-template-rows: auto 1fr 1fr;
-    gap: 20px;
+  /* The live view locks to the viewport: no page scrolling while teaching.
+     145px ≈ header + footer + main padding. The grid's two gauge rows share
+     the leftover height; the transcript scrolls INTERNALLY. */
+  #view-live.active {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 152px);
   }
+  .live-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: 1fr 1fr 1.55fr;
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
+  }
+  .live-bottom { flex: 0 0 auto; position: static; padding-top: 0; }
+
   .attention-module { grid-row: 1; }
-  .attention-canvas { height: 170px; }
-  .attn-readout { font-size: 32px; }
+  .attention-canvas { height: 120px; }
+  .attn-readout { font-size: 26px; }
   .transcript-module {
     grid-column: 3;
     grid-row: 2 / 4;
     display: flex;
     flex-direction: column;
+    min-height: 0;
   }
   .transcript-module .transcript-scroll {
     flex: 1;
     height: auto;
-    min-height: 320px;
-    font-size: 21px;
-    line-height: 1.8;
+    min-height: 0;
+    font-size: 18px;
+    line-height: 1.7;
   }
-  .gauge-module { justify-content: space-between; }
-  .dial { max-width: 280px; }
-  .readout { font-size: 58px; }
-  .readout.huge { font-size: 92px; }
-  .readout-unit { font-size: 13px; }
-  .pace-word { font-size: 17px; }
-  .vu-track.tall { height: 40px; }
-  .timeline-strip { height: 64px; }
-  .interaction-btn { font-size: 32px; min-height: 92px; }
-  .timer-stack { min-width: 150px; }
-  .timer-row { font-size: 18px; }
-  .timer-row.total { font-size: 20px; }
+  .gauge-module { justify-content: center; overflow: hidden; min-height: 0; }
+  .dial { max-width: 170px; }
+  .readout { font-size: 44px; }
+  .readout.huge { font-size: 60px; }
+  .readout-unit { font-size: 12px; }
+  .pace-word { font-size: 14px; }
+  .vu-track.tall { height: 30px; }
+  .timeline-strip { height: 44px; }
+  .interaction-btn { font-size: 26px; min-height: 64px; }
+  .timer-stack { min-width: 140px; }
+  .timer-row { font-size: 15px; }
+  .timer-row.total { font-size: 17px; }
 
   .chart { height: 220px; }
   .chart.tallchart { height: 280px; }

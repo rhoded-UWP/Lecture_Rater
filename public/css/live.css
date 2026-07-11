@@ -11,17 +11,23 @@
 .live-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 14px;
 }
+
+/* Glance-density: the whole dashboard must fit one screen while teaching —
+   tighter panels than the rest of the app, no stacked margins (the grid gap
+   is the only spacing). */
+#view-live .module { margin-bottom: 0; padding: 12px 16px; }
+#view-live .module-label { margin-bottom: 8px; }
 
 /* --------------------------------------------------- estimated attention
    The prominent top graph (attention-timeline-feature-spec.md). Canvas is
    drawn by drawAttentionChart in charts.js. */
 .attention-module { grid-column: 1 / -1; }
-.attention-canvas { width: 100%; height: 150px; display: block; }
+.attention-canvas { width: 100%; height: 110px; display: block; }
 .attn-readout {
   margin-left: 12px;
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--green);
   text-shadow: 0 0 10px rgba(79, 208, 140, 0.4);
@@ -40,18 +46,18 @@
 .gauge-module { text-align: center; display: flex; flex-direction: column; align-items: center; }
 .gauge-module .module-label { justify-content: center; }
 
-.dial { width: 100%; max-width: 210px; }
+.dial { width: 100%; max-width: 180px; }
 
 .readout {
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 44px;
+  font-size: 38px;
   line-height: 1.05;
   color: var(--amber);
   text-shadow: var(--glow-amber);
   font-variant-numeric: tabular-nums;
 }
-.readout.huge { font-size: 64px; }
+.readout.huge { font-size: 52px; }
 .readout-unit {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -116,7 +122,7 @@
 .transcript-module .switch { margin-left: auto; }
 
 .transcript-scroll {
-  height: 150px;
+  height: 120px;
   overflow-y: auto;
   font-size: 17px;
   line-height: 1.7;
@@ -141,24 +147,24 @@
 .live-bottom {
   position: sticky;
   bottom: 0;
-  margin-top: 16px;
+  margin-top: 12px;
   background: linear-gradient(180deg, rgba(11,13,16,0.4), var(--bg) 30%);
-  padding-top: 10px;
+  padding-top: 8px;
 }
 .strip-wrap {
   border: 1px solid var(--edge);
   border-radius: var(--radius);
   background: var(--panel);
   padding: 4px 8px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
-.timeline-strip { width: 100%; height: 46px; display: block; }
+.timeline-strip { width: 100%; height: 42px; display: block; }
 
 .live-controls {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding-bottom: 12px;
+  padding-bottom: 10px;
 }
 
 /* three timers: LEC / ACT / TOT */
@@ -216,15 +222,15 @@ body.nonlecture::before {
   flex: 1;
   font-family: var(--font-label);
   font-weight: 700;
-  font-size: 26px;
+  font-size: 24px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--bg);
   background: linear-gradient(180deg, #ffc477, var(--amber));
   border: none;
   border-radius: 8px;
-  padding: 20px;
-  min-height: 76px;
+  padding: 14px;
+  min-height: 64px;
   cursor: pointer;
   box-shadow: 0 4px 0 #8a5a1e, var(--glow-amber);
   transition: transform 0.05s, box-shadow 0.05s;
