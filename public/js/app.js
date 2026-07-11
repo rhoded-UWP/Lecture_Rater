@@ -88,13 +88,10 @@ async function initSetup() {
   initObjectives();
   updateGoLive();
 
-  // the MP4 testing pipeline needs ffmpeg + a Whisper key on the server
-  try {
-    const status = await (await fetch('/api/status')).json();
-    $('upload-video-btn').classList.toggle('hidden', !(status.ffmpeg && status.whisperConfigured));
-  } catch {
-    /* server unreachable — button stays hidden */
-  }
+  // The MP4 testing pipeline needs ffmpeg + a Whisper key on the server.
+  // The button stays visible regardless (per Dan) — clicking without the
+  // prerequisites surfaces the server's error message.
+  $('upload-video-btn').classList.remove('hidden');
 }
 
 function updateGoLive() {
