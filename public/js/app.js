@@ -20,6 +20,9 @@ const WPM_SCALE_MAX = 220;
 let settings = loadSettings();
 let modes = [];
 let selectedModeId = null;
+// Session type is no longer user-selectable (the console toggle was removed);
+// all sessions record as 'rehearsal'. The 'live' privacy code paths remain in
+// endSession/factcheckTranscript should classroom mode ever return.
 let sessionType = 'rehearsal';
 
 let micChecker = null;      // EnergyAnalyzer during mic check
@@ -93,18 +96,8 @@ function updateGoLive() {
     ? 'Chrome required for live transcription'
     : !selectedModeId
       ? 'select a mode to arm the console'
-      : `armed · ${modes.find((m) => m.id === selectedModeId)?.title} · ${sessionType} · ${settings.lectureLengthMin} min`;
+      : `armed · ${modes.find((m) => m.id === selectedModeId)?.title} · ${settings.lectureLengthMin} min`;
 }
-
-// session type toggle
-document.querySelectorAll('#type-toggle .type-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    sessionType = btn.dataset.type;
-    document.querySelectorAll('#type-toggle .type-btn').forEach((b) => b.classList.toggle('active', b === btn));
-    $('live-privacy-note').classList.toggle('hidden', sessionType !== 'live');
-    updateGoLive();
-  });
-});
 
 // pacing profile toggle (research-based WPM bands)
 function syncPaceToggle() {
@@ -827,7 +820,7 @@ function renderReport(session) {
   const blocks = session.timeline.nonlecture?.length ?? session.timeline.interactions?.length ?? 0;
   $('report-meta').innerHTML = [
     `${fmtDate(session.sessionId)}`,
-    `${esc(mode?.title || session.mode)} · ${session.type === 'live' ? 'LIVE CLASSROOM' : 'REHEARSAL'}`,
+    `${esc(mode?.title || session.mode)}${session.type === 'live' ? ' · LIVE CLASSROOM' : ''}`,
     `LECTURE ${fmtClock(lecSec)} · ACTIVITY ${fmtClock(actSec)} (${session.durationSec ? Math.round((actSec / session.durationSec) * 100) : 0}%) · TOTAL ${fmtClock(session.durationSec)}${session.plannedMin ? ` of ${session.plannedMin} min planned` : ''}`,
     `${blocks} nonlecture block${blocks === 1 ? '' : 's'} · ${session.precision ? 'precision transcript' : 'live transcript only'}`,
   ].join('<br>');

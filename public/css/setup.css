@@ -95,48 +95,41 @@
 
 /* ------------------------------------------- lecture length selector */
 
-.length-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(38, 43, 51, 0.6);
-}
+.length-toggle { display: flex; align-items: center; gap: 8px; }
 .length-label {
   font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--faint);
-  margin-right: 4px;
 }
 .len-btn {
+  flex: 1;
   font-family: var(--font-label);
   font-weight: 600;
-  font-size: 13.5px;
-  letter-spacing: 0.1em;
+  font-size: 16px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--dim);
   background: #101318;
   border: 1px solid var(--edge);
   border-radius: var(--radius);
-  padding: 6px 14px;
-  min-height: 34px;
+  padding: 10px 14px;
+  min-height: 46px;
   cursor: pointer;
   transition: all 0.15s;
 }
 .len-btn:hover { color: var(--ink); border-color: var(--dim); }
-.len-btn.active { color: var(--green); border-color: var(--green); box-shadow: 0 0 8px rgba(79,208,140,0.2); }
+.len-btn.active { color: var(--green); border-color: var(--green); box-shadow: 0 0 10px rgba(79,208,140,0.2); }
 #custom-length {
-  width: 72px;
+  width: 88px;
   background: #0d1014;
   border: 1px solid var(--edge);
   border-radius: var(--radius);
   color: var(--amber);
   font-family: var(--font-mono);
-  font-size: 14px;
-  padding: 6px 8px;
-  min-height: 34px;
+  font-size: 15px;
+  padding: 8px 10px;
+  min-height: 46px;
 }
 #custom-length:focus { outline: 2px solid var(--amber); outline-offset: 1px; }
 
