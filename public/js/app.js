@@ -9,6 +9,7 @@ import { SessionMetrics, countFillersFromWords, detectStutters, lectureStretches
 import { computeScores } from './scoring.js';
 import * as store from './storage.js';
 import { drawLineChart, drawMonologueBars, drawTimelineStrip, drawSparkline, dialAngle, INK } from './charts.js';
+import { initDevPanel, logUsage } from './dev-panel.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -74,7 +75,10 @@ async function initSetup() {
     });
     list.appendChild(card);
   }
-  if (modes.length === 1) list.querySelector('.mode-card')?.click();
+  // Pre-select "Default — No Content Check" so the console is armed on load;
+  // fall back to the first mode if it's ever removed.
+  const defaultIdx = Math.max(0, modes.findIndex((m) => m.id === 'default'));
+  if (modes.length) list.querySelectorAll('.mode-card')[defaultIdx]?.click();
 
   renderSettingsPanel();
   initObjectives();
@@ -88,7 +92,7 @@ function updateGoLive() {
     ? 'Chrome required for live transcription'
     : !selectedModeId
       ? 'select a mode to arm the console'
-      : `armed · ${modes.find((m) => m.id === selectedModeId)?.title} · ${sessionType}`;
+      : `armed · ${modes.find((m) => m.id === selectedModeId)?.title} · ${sessionType} · ${settings.lectureLengthMin} min`;
 }
 
 // session type toggle
@@ -115,6 +119,46 @@ document.querySelectorAll('#pace-toggle .type-btn').forEach((btn) => {
   });
 });
 syncPaceToggle();
+
+// lecture length selector (50 / 75 / custom minutes)
+function syncLengthButtons() {
+  const min = settings.lectureLengthMin;
+  const isPreset = min === 50 || min === 75;
+  document.querySelectorAll('.len-btn').forEach((b) => {
+    b.classList.toggle(
+      'active',
+      b.dataset.min === 'custom' ? !isPreset : Number(b.dataset.min) === min
+    );
+  });
+  $('custom-length').classList.toggle('hidden', isPreset);
+  $('custom-length-unit').classList.toggle('hidden', isPreset);
+  if (!isPreset) $('custom-length').value = min;
+}
+document.querySelectorAll('.len-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.min === 'custom') {
+      if (settings.lectureLengthMin === 50 || settings.lectureLengthMin === 75) {
+        settings.lectureLengthMin = 60; // starting point for custom entry
+      }
+    } else {
+      settings.lectureLengthMin = Number(btn.dataset.min);
+    }
+    saveSettings(settings);
+    syncLengthButtons();
+    updateGoLive();
+    if (btn.dataset.min === 'custom') $('custom-length').focus();
+  });
+});
+$('custom-length').addEventListener('change', () => {
+  const v = Math.round(parseFloat($('custom-length').value));
+  if (v >= 5 && v <= 240) {
+    settings.lectureLengthMin = v;
+    saveSettings(settings);
+    updateGoLive();
+  }
+  syncLengthButtons();
+});
+syncLengthButtons();
 
 // settings panel
 const SETTING_FIELDS = [
@@ -411,6 +455,12 @@ function liveTick() {
   $('timer-nonlecture').textContent = fmtClock(m.nonlectureSec());
   $('timer-total').textContent = fmtClock(t);
 
+  // warn as the planned lecture length approaches, alert when over
+  const plannedSec = settings.lectureLengthMin * 60;
+  const totalRow = $('timer-total').closest('.timer-row');
+  totalRow.classList.toggle('over', t >= plannedSec);
+  totalRow.classList.toggle('near', t < plannedSec && t >= plannedSec - settings.lectureEndWarnMin * 60);
+
   const gap = m.continuousLectureSec();
   const sw = $('gap-stopwatch');
   sw.textContent = inNL ? '—' : fmtClock(gap);
@@ -458,7 +508,9 @@ function liveTick() {
     $('energy-word').textContent = 'PAUSED — NONLECTURE';
   }
 
-  drawTimelineStrip($('timeline-strip'), t, m.nonlecture);
+  drawTimelineStrip($('timeline-strip'), t, m.nonlecture, {
+    minHorizonSec: settings.lectureLengthMin * 60,
+  });
 }
 
 /** Spacebar / big button: toggle nonlecture activity (lab or video).
@@ -538,6 +590,7 @@ async function endSession() {
     mode: selectedModeId,
     type: sessionType,
     paceProfile: settings.paceProfile,
+    plannedMin: settings.lectureLengthMin,
     durationSec,
     lectureSec: Math.round(metrics.lectureSec(durationSec)),
     nonlectureSec: Math.round(metrics.nonlectureSec(durationSec)),
@@ -558,6 +611,16 @@ async function endSession() {
     courseOutcomes: parseObjectives($('course-outcomes').value),
     precision: false,
   };
+
+  // live captions ran the whole lecture (free, but tracked for completeness)
+  if (session.lectureSec > 30) {
+    logUsage({
+      role: 'transcription',
+      provider: 'Google Web Speech',
+      model: 'chrome built-in',
+      minutes: Math.round((session.lectureSec / 60) * 10) / 10,
+    });
+  }
 
   // --- 1 · Whisper precision pass -----------------------------------------
   setProc('proc-transcribe', 'active', 'uploading…');
@@ -588,6 +651,12 @@ async function endSession() {
         if (sessionType === 'live') applyPrivacyExclusion(session);
       }
       session.precision = true;
+      logUsage({
+        role: 'tone-timing',
+        provider: 'OpenAI Whisper',
+        model: 'whisper-1',
+        minutes: Math.round(((data.durationSec ?? session.lectureSec) / 60) * 10) / 10,
+      });
       setProc('proc-transcribe', 'done', 'word-level transcript ready');
     } catch (err) {
       setProc('proc-transcribe', 'skipped', `skipped — ${err.message}`);
@@ -614,6 +683,15 @@ async function endSession() {
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       session.accuracyFlags = data.flags;
+      if (data.usage) {
+        logUsage({
+          role: 'content',
+          provider: 'Anthropic Claude',
+          model: data.model,
+          inputTokens: data.usage.inputTokens,
+          outputTokens: data.usage.outputTokens,
+        });
+      }
       setProc('proc-factcheck', 'done', `${data.flags.length} flag${data.flags.length === 1 ? '' : 's'}`);
     } catch (err) {
       session.accuracyFlags = null;
@@ -716,7 +794,7 @@ function renderReport(session) {
   $('report-meta').innerHTML = [
     `${fmtDate(session.sessionId)}`,
     `${esc(mode?.title || session.mode)} · ${session.type === 'live' ? 'LIVE CLASSROOM' : 'REHEARSAL'}`,
-    `LECTURE ${fmtClock(lecSec)} · ACTIVITY ${fmtClock(actSec)} (${session.durationSec ? Math.round((actSec / session.durationSec) * 100) : 0}%) · TOTAL ${fmtClock(session.durationSec)}`,
+    `LECTURE ${fmtClock(lecSec)} · ACTIVITY ${fmtClock(actSec)} (${session.durationSec ? Math.round((actSec / session.durationSec) * 100) : 0}%) · TOTAL ${fmtClock(session.durationSec)}${session.plannedMin ? ` of ${session.plannedMin} min planned` : ''}`,
     `${blocks} nonlecture block${blocks === 1 ? '' : 's'} · ${session.precision ? 'precision transcript' : 'live transcript only'}`,
   ].join('<br>');
 
@@ -1028,6 +1106,18 @@ function escapeRe(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// pointer-aware modules: feed the cursor position into the hovered module's
+// CSS variables so its spotlight (see studio.css) tracks the mouse
+if (window.matchMedia('(hover: hover)').matches) {
+  document.addEventListener('pointermove', (e) => {
+    const mod = e.target.closest?.('.module');
+    if (!mod || mod.closest('.dev-overlay')) return; // dev panel opts out
+    const r = mod.getBoundingClientRect();
+    mod.style.setProperty('--mx', `${Math.round(e.clientX - r.left)}px`);
+    mod.style.setProperty('--my', `${Math.round(e.clientY - r.top)}px`);
+  });
+}
+
 // redraw charts on resize (canvas backing store depends on layout size)
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
@@ -1049,4 +1139,5 @@ const r1 = (v) => Math.round(v * 10) / 10;
 
 // boot
 buildDial();
+initDevPanel();
 initSetup();

@@ -58,6 +58,14 @@
             <p class="dim-note hidden" id="live-privacy-note">
               Live mode: student speech is never fact-checked or scored. Transcript near activity boundaries is excluded from the accuracy pass. Session data stays in this browser.
             </p>
+            <div class="length-row">
+              <span class="length-label mono">Length</span>
+              <button class="len-btn" data-min="50">50 min</button>
+              <button class="len-btn" data-min="75">75 min</button>
+              <button class="len-btn" data-min="custom">Custom</button>
+              <input type="number" id="custom-length" class="hidden" min="5" max="240" step="5" aria-label="Custom lecture length in minutes">
+              <span class="length-label mono hidden" id="custom-length-unit">min</span>
+            </div>
           </div>
 
           <div class="module">
@@ -280,9 +288,26 @@
   </main>
 
   <footer class="console-footer mono">
-    <span></span>
+    <button class="footer-dev" id="devtools-btn">⚙ Developer Tools</button>
     <span id="footer-status">STANDBY</span>
   </footer>
+
+  <div class="dev-overlay hidden" id="dev-overlay" role="dialog" aria-modal="true" aria-label="Developer Tools">
+    <div class="dev-modal module">
+      <div class="module-label"><span class="led lit-amber"></span>Developer Tools
+        <button class="btn subtle dev-close" id="dev-close" aria-label="Close">✕</button>
+      </div>
+      <div id="dev-lock">
+        <p class="dim-note">This panel manages the AI endpoint configuration and usage tracking. Enter the developer password.</p>
+        <form id="dev-form" class="chip-add">
+          <input type="password" id="dev-pass" placeholder="developer password" autocomplete="off">
+          <button class="btn primary" type="submit">Unlock</button>
+        </form>
+        <p class="dev-error hidden" id="dev-error">Incorrect password.</p>
+      </div>
+      <div id="dev-panel" class="hidden"></div>
+    </div>
+  </div>
 
   <script type="module" src="js/app.js"></script>
 </body>

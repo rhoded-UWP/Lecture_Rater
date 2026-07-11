@@ -28,6 +28,18 @@ const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '10mb' }));
 
+// --------------------------------------------------------------- /api/status
+// Configuration state for the developer panel. Never returns key material —
+// only whether each pass is configured and which model the server will use.
+app.get('/api/status', (_req, res) => {
+  res.json({
+    whisperConfigured: !!OPENAI_KEY,
+    claudeConfigured: !!ANTHROPIC_KEY,
+    factcheckModel: FACTCHECK_MODEL,
+    uptimeSec: Math.round(process.uptime()),
+  });
+});
+
 // ---------------------------------------------------------------- /api/modes
 app.get('/api/modes', async (_req, res) => {
   try {
@@ -168,7 +180,13 @@ ${transcriptText}`;
         return res.status(502).json({ error: 'Fact-check response was not valid JSON.', raw: text.slice(0, 500) });
       }
     }
-    res.json({ flags });
+    res.json({
+      flags,
+      model: data.model || FACTCHECK_MODEL,
+      usage: data.usage
+        ? { inputTokens: data.usage.input_tokens ?? 0, outputTokens: data.usage.output_tokens ?? 0 }
+        : null,
+    });
   } catch (err) {
     res.status(500).json({ error: `Fact-check failed: ${err.message}` });
   }

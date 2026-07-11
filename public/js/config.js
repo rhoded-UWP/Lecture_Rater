@@ -49,6 +49,10 @@ export function classifyWpm(wpm, profileKey) {
 }
 
 export const DEFAULTS = {
+  // --- Session ---
+  lectureLengthMin: 50,       // planned class length: 50, 75, or custom minutes
+  lectureEndWarnMin: 5,       // TOT timer turns amber this many minutes before the end
+
   // --- Pace ---
   paceProfile: 'standard',    // which PACE_PROFILES gauge is active
   wpmWindowSec: 30,           // rolling window for the live WPM gauge (research: 20–30s)
