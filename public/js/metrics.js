@@ -206,9 +206,17 @@ export function countFillersFromWords(words, fillerList) {
   return fillers.sort((a, b) => a.t - b.t);
 }
 
-/** Stutter/restart detection from Whisper word timestamps (Phase 2). */
+/** Stutter/restart detection from word-timestamped transcripts (Phase 2).
+ * With AssemblyAI's disfluencies mode, part-word stutters arrive as single
+ * hyphenated tokens ("th-that", "b-but") — caught here as kind 'stutter'. */
 export function detectStutters(words, stutterGapSec) {
   const stutters = [];
+  for (let i = 0; i < words.length; i++) {
+    const pw = words[i].word.match(/^([a-z']{1,4})-([a-z']{2,})$/i);
+    if (pw && pw[2].toLowerCase().startsWith(pw[1].toLowerCase())) {
+      stutters.push({ t: round2(words[i].start), kind: 'stutter', text: words[i].word });
+    }
+  }
   for (let i = 1; i < words.length; i++) {
     const prev = normalizeToken(words[i - 1].word);
     const cur = normalizeToken(words[i].word);
@@ -232,7 +240,7 @@ export function detectStutters(words, stutterGapSec) {
       }
     }
   }
-  return stutters;
+  return stutters.sort((a, b) => a.t - b.t);
 }
 
 export function tokenize(text) {

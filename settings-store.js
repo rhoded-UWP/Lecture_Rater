@@ -11,7 +11,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FILE = path.join(__dirname, 'dev-settings.json');
 
 const DEFAULTS = {
-  transcriptionProvider: 'whisper',
+  // AssemblyAI (disfluencies:true) is the default precision pass: unlike
+  // Whisper it transcribes fillers and stutters verbatim, so they can be
+  // counted. Whisper remains selectable in the dev panel.
+  transcriptionProvider: 'assemblyai',
   factcheckModelId: 'claude-haiku-4-5', // quick pass — cheap model
   deepAnalysisModelId: 'claude-opus-4-8', // deep pass — best model
 };

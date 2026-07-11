@@ -19,8 +19,8 @@ export const TRANSCRIPTION_PROVIDERS = [
   },
   {
     id: 'assemblyai',
-    label: 'AssemblyAI',
-    model: 'universal',
+    label: 'AssemblyAI (verbatim)',
+    model: 'universal-2 + disfluencies',
     envKey: 'ASSEMBLYAI_API_KEY',
     costPerMin: 0.0062, // ~$0.37/hr Universal tier
     approxPricing: true,

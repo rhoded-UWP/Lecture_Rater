@@ -18,11 +18,20 @@ class TranscriptionError extends Error {
 
 // ------------------------------------------------------------ OpenAI Whisper
 
+// The "prompt trick": Whisper is trained to clean disfluencies out of its
+// transcripts, which hides exactly what this app counts. Priming it with
+// filler-laden text biases it toward verbatim output. Partial fix only —
+// AssemblyAI with disfluencies:true is the reliable option.
+const WHISPER_VERBATIM_PROMPT =
+  "Umm, let me think like, hmm... Okay, so um, here's what I'm, like, thinking. " +
+  'So uh, it, it, you know, it\'s it\'s kind of, er, ah, right? I mean, yeah so.';
+
 async function whisperTranscribe(buffer, mimetype, filename) {
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mimetype }), filename);
   form.append('model', 'whisper-1');
   form.append('response_format', 'verbose_json');
+  form.append('prompt', WHISPER_VERBATIM_PROMPT);
   form.append('timestamp_granularities[]', 'word');
   form.append('timestamp_granularities[]', 'segment');
   const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -81,9 +90,14 @@ async function assemblyaiTranscribe(buffer) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       audio_url: upload_url,
-      speech_model: 'universal',
+      speech_models: ['universal-2'], // their standard tier; see AssemblyAI model docs
       punctuate: true,
       format_text: true,
+      // The reason AssemblyAI is the recommended precision provider: its
+      // disfluency model transcribes fillers (um, uh, er, hmm...), word
+      // repetitions, restarts, and part-word stutters verbatim — the raw
+      // material for the filler and stutter counters.
+      disfluencies: true,
     }),
   });
 

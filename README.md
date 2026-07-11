@@ -30,7 +30,7 @@ A missing key just greys that provider out in the dev panel — nothing breaks.
 
 Every AI endpoint is swappable at runtime from **⚙ Developer Tools** (bottom-left) — no restart:
 
-- **Transcription — precision pass:** OpenAI Whisper or AssemblyAI
+- **Transcription — precision pass:** AssemblyAI with `disfluencies: true` (default — transcribes um/uh, repetitions, and part-word stutters verbatim so they can be counted) or OpenAI Whisper (primed with a verbatim prompt; partial filler capture only). Live captions always stay on the free Chrome Web Speech API regardless.
 - **Quick fact-check** (runs automatically each session): any model in the catalog — default Claude Haiku 4.5 (cheap)
 - **Deep analysis** (manual button, paid): any model in the catalog — default Claude Opus 4.8 (best)
 
