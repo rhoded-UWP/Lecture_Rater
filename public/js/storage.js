@@ -49,10 +49,11 @@ export function importSessionFile(file) {
   });
 }
 
-/** Personal records across all saved sessions. */
+/** Personal records across all saved sessions.
+ * Uploaded test videos are excluded — records track real teaching. */
 export function personalRecords(sessions) {
   if (!sessions.length) return [];
-  const scored = sessions.filter((s) => s.scores);
+  const scored = sessions.filter((s) => s.scores && s.type !== 'upload');
   const best = (key, label, fmt = (v) => v) => {
     let top = null;
     for (const s of scored) {

@@ -259,3 +259,7 @@
   background: var(--rec-red);
   box-shadow: var(--glow-red);
 }
+
+/* Upload MP4 — the testing pipeline entry, sits beside GO LIVE.
+   Hidden until /api/status confirms ffmpeg + Whisper are available. */
+.upload-btn { min-height: 56px; padding: 13px 22px; }

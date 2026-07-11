@@ -87,6 +87,14 @@ async function initSetup() {
   renderSettingsPanel();
   initObjectives();
   updateGoLive();
+
+  // the MP4 testing pipeline needs ffmpeg + a Whisper key on the server
+  try {
+    const status = await (await fetch('/api/status')).json();
+    $('upload-video-btn').classList.toggle('hidden', !(status.ffmpeg && status.whisperConfigured));
+  } catch {
+    /* server unreachable — button stays hidden */
+  }
 }
 
 function updateGoLive() {
@@ -165,6 +173,7 @@ const SETTING_FIELDS = [
   ['pointsPerFillerPerMin', 'Clarity pts / filler-per-min'],
   ['pointsPerStutterPerMin', 'Clarity pts / stutter-per-min'],
   ['interactionExclusionSec', 'Live exclusion window (s)'],
+  ['uploadSilenceNonlectureSec', 'Upload: silence = activity (s)'],
 ];
 const WEIGHT_KEYS = ['pace', 'clarity', 'engagement', 'vocalEnergy', 'accuracy'];
 
@@ -606,6 +615,7 @@ async function endSession() {
   $('footer-status').textContent = 'PROCESSING';
   document.querySelectorAll('.tab').forEach((t) => (t.disabled = false));
   showView('processing');
+  $('proc-extract').classList.add('hidden'); // live sessions skip the video step
   setProc('proc-transcribe', 'queued');
   setProc('proc-factcheck', 'queued');
   setProc('proc-scoring', 'queued');
@@ -692,7 +702,12 @@ async function endSession() {
     setProc('proc-transcribe', 'skipped', audioBlob ? 'session too short' : 'recording unavailable');
   }
 
-  // --- 2 · Claude fact-check ----------------------------------------------
+  await factcheckAndScore(session);
+}
+
+/** Shared tail of the pipeline: Claude fact-check, scoring, then the report.
+ * Used by both live sessions (endSession) and uploaded videos. */
+async function factcheckAndScore(session) {
   const sessionMode = modes.find((m) => m.id === session.mode);
   if (sessionMode?.factcheck === false) {
     session.accuracyFlags = null;
@@ -726,7 +741,6 @@ async function endSession() {
     }
   }
 
-  // --- 3 · Scoring ----------------------------------------------------------
   setProc('proc-scoring', 'active', 'computing…');
   session.scores = computeScores(session, settings);
   setProc('proc-scoring', 'done', `overall ${session.scores.overall}`);
@@ -737,6 +751,118 @@ async function endSession() {
     currentSessionSaved = false;
     renderReport(session);
   }, 600);
+}
+
+// ============================================================ MP4 upload
+// Testing pipeline: run a recorded lecture through the exact same analysis
+// as a live session. The video goes to the local server, ffmpeg strips the
+// audio, Whisper transcribes it, and everything downstream (fillers,
+// stutters, WPM, attention, fact-check, scoring) reuses the live code paths.
+
+$('upload-video-btn').addEventListener('click', () => $('video-input').click());
+$('video-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file && !live) runUploadSession(file);
+});
+
+async function runUploadSession(file) {
+  showView('processing');
+  $('proc-extract').classList.remove('hidden');
+  setProc('proc-extract', 'active', `uploading ${Math.round(file.size / 1048576)} MB + extracting audio…`);
+  setProc('proc-transcribe', 'queued');
+  setProc('proc-factcheck', 'queued');
+  setProc('proc-scoring', 'queued');
+  $('footer-status').textContent = 'PROCESSING UPLOAD';
+
+  let data;
+  try {
+    const form = new FormData();
+    form.append('video', file, file.name);
+    const r = await fetch('/api/transcribe-video', { method: 'POST', body: form });
+    data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    if (!data.words.length) throw new Error('no speech found in the video');
+    setProc('proc-extract', 'done', 'audio extracted · video deleted');
+    setProc('proc-transcribe', 'done', 'word-level transcript ready');
+  } catch (err) {
+    setProc('proc-extract', 'skipped', `failed — ${err.message}`);
+    $('footer-status').textContent = 'STANDBY';
+    alert(`Upload processing failed: ${err.message}`);
+    showView('setup');
+    return;
+  }
+
+  const durationSec = Math.round(data.durationSec ?? data.words[data.words.length - 1].end);
+  const fillerList = activeFillerList(settings);
+  const nonlecture = inferNonlectureFromSilence(data.words, durationSec);
+  const nonlectureSec = nonlecture.reduce((s, [a, b]) => s + (b - a), 0);
+
+  const session = {
+    version: 1,
+    sessionId: new Date().toISOString().slice(0, 19).replace(/:/g, '-'),
+    mode: selectedModeId,
+    type: 'upload',
+    sourceFile: file.name,
+    paceProfile: settings.paceProfile,
+    plannedMin: settings.lectureLengthMin,
+    durationSec,
+    lectureSec: durationSec - nonlectureSec,
+    nonlectureSec,
+    scores: null,
+    timeline: {
+      wpm: rebuildWpmTimeline(data.words, durationSec),
+      energy: [], // vocal energy is not computed for uploads (v1) — renormalized out
+      attention: [],
+      nonlecture,
+      fillers: countFillersFromWords(data.words, fillerList),
+      stutters: detectStutters(data.words, settings.stutterGapSec),
+    },
+    accuracyFlags: null,
+    transcript: data.segments.map((s) => ({ t: r1(s.t), end: r1(s.end), text: s.text })),
+    customFillerList: fillerList,
+    learningObjectives: parseObjectives($('lecture-objectives').value),
+    courseOutcomes: parseObjectives($('course-outcomes').value),
+    precision: true,
+  };
+
+  // an inferred silence block is activity, not a giant hesitation
+  session.timeline.stutters = session.timeline.stutters.filter(
+    (st) => !nonlecture.some(([a, b]) => st.t >= a - 2 && st.t <= b + 2)
+  );
+
+  // attention samples for the saved timeline (report redraws at full fidelity)
+  const blocksMin = blocksToMinutes(nonlecture);
+  for (let t = 0; t <= durationSec; t += settings.timelineSampleSec) {
+    session.timeline.attention.push([t, Math.round(estimateAttention(t / 60, blocksMin).score)]);
+  }
+
+  logUsage({
+    role: 'tone-timing',
+    provider: 'OpenAI Whisper',
+    model: 'whisper-1',
+    minutes: Math.round((durationSec / 60) * 10) / 10,
+    note: `upload: ${file.name}`,
+  });
+
+  await factcheckAndScore(session);
+}
+
+/** Long word gaps in an uploaded lecture become inferred nonlecture blocks
+ * (threshold: settings.uploadSilenceNonlectureSec). */
+function inferNonlectureFromSilence(words, durationSec) {
+  const threshold = settings.uploadSilenceNonlectureSec;
+  const blocks = [];
+  for (let i = 1; i < words.length; i++) {
+    const gap = words[i].start - words[i - 1].end;
+    if (gap >= threshold) {
+      blocks.push([
+        Math.max(0, Math.round(words[i - 1].end + 2)),
+        Math.min(durationSec, Math.round(words[i].start - 2)),
+      ]);
+    }
+  }
+  return blocks;
 }
 
 function setProc(id, state, text) {
@@ -820,7 +946,7 @@ function renderReport(session) {
   const blocks = session.timeline.nonlecture?.length ?? session.timeline.interactions?.length ?? 0;
   $('report-meta').innerHTML = [
     `${fmtDate(session.sessionId)}`,
-    `${esc(mode?.title || session.mode)}${session.type === 'live' ? ' · LIVE CLASSROOM' : ''}`,
+    `${esc(mode?.title || session.mode)}${session.type === 'live' ? ' · LIVE CLASSROOM' : ''}${session.type === 'upload' ? ` · UPLOADED VIDEO · ${esc(session.sourceFile || '')}` : ''}`,
     `LECTURE ${fmtClock(lecSec)} · ACTIVITY ${fmtClock(actSec)} (${session.durationSec ? Math.round((actSec / session.durationSec) * 100) : 0}%) · TOTAL ${fmtClock(session.durationSec)}${session.plannedMin ? ` of ${session.plannedMin} min planned` : ''}`,
     `${blocks} nonlecture block${blocks === 1 ? '' : 's'} · ${session.precision ? 'precision transcript' : 'live transcript only'}`,
   ].join('<br>');
@@ -1084,7 +1210,8 @@ function renderHistory() {
     const canvas = document.createElement('canvas');
     cell.appendChild(canvas);
     trendGrid.appendChild(cell);
-    const values = sessions.map((s) => s.scores?.[key]).filter((v) => v != null);
+    // trend lines track real teaching — uploaded test videos are excluded
+    const values = sessions.filter((s) => s.type !== 'upload').map((s) => s.scores?.[key]).filter((v) => v != null);
     requestAnimationFrame(() => drawSparkline(canvas, values, key === 'overall' ? INK.amber : INK.cyan));
   }
 
@@ -1101,7 +1228,7 @@ function renderHistory() {
     row.innerHTML = `
       <div class="s-score" style="color:${scoreColor(s.scores?.overall ?? 0)}">${s.scores?.overall ?? '—'}</div>
       <div class="s-meta">
-        <div class="s-title">${esc(modes.find((m) => m.id === s.mode)?.title || s.mode)} · ${s.type === 'live' ? 'live' : 'rehearsal'}</div>
+        <div class="s-title">${esc(modes.find((m) => m.id === s.mode)?.title || s.mode)} · ${s.type === 'upload' ? '⬆ upload' : s.type === 'live' ? 'live' : 'rehearsal'}</div>
         <div class="s-sub">${fmtDate(s.sessionId)} · ${fmtClock(s.durationSec)}${s.nonlectureSec ? ` · lec ${fmtClock(s.lectureSec)} / act ${fmtClock(s.nonlectureSec)}` : ''}</div>
       </div>
       <div class="s-subscores">${subs}</div>

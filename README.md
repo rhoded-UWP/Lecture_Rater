@@ -224,7 +224,9 @@ Rehearsal mode has no such concerns — it's just you.
 | Route | Purpose |
 |---|---|
 | `GET /api/modes` | List available mode files |
+| `GET /api/status` | Key/ffmpeg configuration state (never returns secrets) |
 | `POST /api/transcribe` | Receives session audio → Whisper → returns word-timestamped transcript → **deletes audio** |
+| `POST /api/transcribe-video` | Testing pipeline: MP4 upload → ffmpeg strips a small mono audio track (**video deleted immediately**, audio deleted after read) → Whisper → word-timestamped transcript |
 | `POST /api/factcheck` | Receives transcript + mode id → Claude → returns accuracy flags |
 
 Everything else — live transcription, tone analysis, metrics, scoring, storage — happens in the browser. API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) live in Render environment variables and never reach the client.
@@ -256,6 +258,16 @@ In-browser audio recording (MediaRecorder), `/api/transcribe` with Whisper, stut
 
 ### Phase 3 — Fact-checking & scoring
 Mode file format, `/api/factcheck` with Claude, accuracy report, full five-subscore rating system, score trends and personal records.
+
+### Testing pipeline — Upload MP4
+
+Next to GO LIVE, an **Upload MP4** button (visible only when the server has ffmpeg and `OPENAI_API_KEY`) runs a recorded lecture through the *exact same* analysis code as a live session — the point is predictable, repeatable testing of every feature:
+
+- Server extracts a mono 16 kHz Opus track with ffmpeg (~12 MB for 50 min); the **video is deleted the moment extraction finishes** and the audio right after transcription. Local-machine testing feature — the button hides itself if ffmpeg is absent (e.g., on Render).
+- Whisper word timestamps drive the same filler/stutter/WPM/attention/fact-check/scoring paths as live sessions.
+- **Silence inference**: word gaps ≥ 2 min (configurable: "Upload: silence = activity") become inferred nonlecture blocks, so Engagement and the Attention resets behave realistically.
+- Vocal energy is not computed for uploads (v1); its weight is renormalized out, like an unavailable accuracy pass.
+- Upload sessions are tagged (`type: "upload"`, filename shown), appear in History with an ⬆ badge, and are **excluded from personal records and trend lines** so test runs never pollute real coaching data.
 
 ### Phase 4 — Polish & future ideas (not committed)
 More modes; planned-topic coverage checks ("you never got to Z today"); transcript redaction around nonlecture boundaries; per-lecture written coaching summary from Claude; comparing rehearsal vs. live runs of the same lecture.

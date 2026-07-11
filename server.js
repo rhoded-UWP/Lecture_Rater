@@ -5,7 +5,9 @@
 
 import express from 'express';
 import multer from 'multer';
-import { readdir, readFile } from 'fs/promises';
+import { readdir, readFile, unlink } from 'fs/promises';
+import { spawn } from 'child_process';
+import { tmpdir } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -24,6 +26,23 @@ const upload = multer({
   limits: { fileSize: 120 * 1024 * 1024 },
 });
 
+// Video uploads (the MP4 testing pipeline) are too large for memory — they
+// hit a temp file, ffmpeg strips the audio, and BOTH files are deleted
+// immediately. Nothing persists.
+const uploadVideo = multer({
+  dest: tmpdir(),
+  limits: { fileSize: 3 * 1024 * 1024 * 1024 },
+});
+
+// ffmpeg powers /api/transcribe-video; probe once at startup so /api/status
+// can tell the client whether to show the Upload MP4 button.
+let ffmpegOk = false;
+{
+  const probe = spawn('ffmpeg', ['-version']);
+  probe.on('error', () => { ffmpegOk = false; });
+  probe.on('close', (code) => { ffmpegOk = code === 0; });
+}
+
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '10mb' }));
@@ -36,9 +55,34 @@ app.get('/api/status', (_req, res) => {
     whisperConfigured: !!OPENAI_KEY,
     claudeConfigured: !!ANTHROPIC_KEY,
     factcheckModel: FACTCHECK_MODEL,
+    ffmpeg: ffmpegOk,
     uptimeSec: Math.round(process.uptime()),
   });
 });
+
+// Shared Whisper call: audio buffer in → word-timestamped transcript out.
+async function whisperTranscribe(buffer, mimetype, filename) {
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type: mimetype }), filename);
+  form.append('model', 'whisper-1');
+  form.append('response_format', 'verbose_json');
+  form.append('timestamp_granularities[]', 'word');
+  form.append('timestamp_granularities[]', 'segment');
+  return fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${OPENAI_KEY}` },
+    body: form,
+  });
+}
+
+function shapeTranscript(data) {
+  return {
+    text: data.text || '',
+    words: data.words || [],
+    segments: (data.segments || []).map((s) => ({ t: s.start, end: s.end, text: s.text.trim() })),
+    durationSec: data.duration ?? null,
+  };
+}
 
 // ---------------------------------------------------------------- /api/modes
 app.get('/api/modes', async (_req, res) => {
@@ -69,39 +113,75 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
     return res.status(400).json({ error: 'No audio file received.' });
   }
   try {
-    const form = new FormData();
-    form.append(
-      'file',
-      new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/webm' }),
+    const r = await whisperTranscribe(
+      req.file.buffer,
+      req.file.mimetype || 'audio/webm',
       req.file.originalname || 'session.webm'
     );
-    form.append('model', 'whisper-1');
-    form.append('response_format', 'verbose_json');
-    form.append('timestamp_granularities[]', 'word');
-    form.append('timestamp_granularities[]', 'segment');
-
-    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${OPENAI_KEY}` },
-      body: form,
-    });
     if (!r.ok) {
       const detail = await r.text().catch(() => '');
       return res.status(502).json({ error: `Whisper request failed (${r.status})`, detail: detail.slice(0, 500) });
     }
-    const data = await r.json();
-    res.json({
-      text: data.text || '',
-      words: data.words || [],
-      segments: (data.segments || []).map((s) => ({ t: s.start, end: s.end, text: s.text.trim() })),
-      durationSec: data.duration ?? null,
-    });
+    res.json(shapeTranscript(await r.json()));
   } catch (err) {
     res.status(500).json({ error: `Transcription failed: ${err.message}` });
   } finally {
     // Audio-deletion guarantee: memory storage means nothing ever hit disk;
     // drop the reference so the buffer is collectable immediately.
     if (req.file) req.file.buffer = null;
+  }
+});
+
+// ----------------------------------------------------- /api/transcribe-video
+// The MP4 testing pipeline: an uploaded lecture video hits a temp file,
+// ffmpeg strips a small mono 16 kHz Opus track (watch-skill recipe — a
+// 75-minute lecture stays well under Whisper's 25 MB cap), the VIDEO is
+// deleted the moment extraction finishes, the audio is deleted right after
+// it's read into memory, and the transcript comes back word-timestamped.
+app.post('/api/transcribe-video', uploadVideo.single('video'), async (req, res) => {
+  const rmQuiet = (p) => unlink(p).catch(() => {});
+  if (!req.file) {
+    return res.status(400).json({ error: 'No video file received.' });
+  }
+  const videoPath = req.file.path;
+  const audioPath = `${videoPath}.ogg`;
+  if (!OPENAI_KEY) {
+    await rmQuiet(videoPath);
+    return res.status(503).json({ error: 'Precision transcription is not configured (OPENAI_API_KEY missing).' });
+  }
+  if (!ffmpegOk) {
+    await rmQuiet(videoPath);
+    return res.status(503).json({ error: 'ffmpeg is not available on this server — the MP4 pipeline is a local testing feature.' });
+  }
+  try {
+    await new Promise((resolve, reject) => {
+      const ff = spawn('ffmpeg', [
+        '-y', '-i', videoPath,
+        '-vn', '-ac', '1', '-ar', '16000',
+        '-c:a', 'libopus', '-b:a', '32k',
+        audioPath,
+      ]);
+      let errTail = '';
+      ff.stderr.on('data', (d) => { errTail = (errTail + d).slice(-400); });
+      ff.on('error', reject);
+      ff.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${errTail}`))));
+    });
+    await rmQuiet(videoPath); // deletion guarantee: video gone before transcription
+
+    const audio = await readFile(audioPath);
+    await rmQuiet(audioPath); // audio now exists only in memory
+
+    const r = await whisperTranscribe(audio, 'audio/ogg', 'lecture.ogg');
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      return res.status(502).json({ error: `Whisper request failed (${r.status})`, detail: detail.slice(0, 500) });
+    }
+    res.json(shapeTranscript(await r.json()));
+  } catch (err) {
+    res.status(500).json({ error: `Video processing failed: ${err.message}` });
+  } finally {
+    await rmQuiet(videoPath);
+    await rmQuiet(audioPath);
   }
 });
 

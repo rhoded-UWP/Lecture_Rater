@@ -86,6 +86,11 @@ export const DEFAULTS = {
   // student speech: it is excluded from fact-checking and scoring in Live mode.
   interactionExclusionSec: 10,
 
+  // --- Uploaded-video testing pipeline ---
+  // A word gap at least this long in an uploaded lecture is treated as
+  // inferred nonlecture activity (lab/video/break) for attention/engagement.
+  uploadSilenceNonlectureSec: 120,
+
   // --- Sampling / detection ---
   timelineSampleSec: 5,       // resolution of the wpm/energy timelines
   stutterGapSec: 1.5,         // mid-sentence pause counted as a hesitation

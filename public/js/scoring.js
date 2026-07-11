@@ -11,7 +11,12 @@ export function computeScores(session, settings) {
   const pace = paceScore(session.timeline.wpm, session.paceProfile || settings.paceProfile, settings);
   const clarity = clarityScore(session, durationMin, settings);
   const engagement = engagementScore(session, settings);
-  const vocalEnergy = energyScore(session.timeline.energy, settings);
+  // Uploaded videos carry no vocal-energy analysis (v1) — renormalize it out
+  // instead of scoring a fake zero, same as an unavailable accuracy pass.
+  const vocalEnergy =
+    session.type === 'upload' && !session.timeline.energy?.length
+      ? null
+      : energyScore(session.timeline.energy, settings);
   const accuracy = session.accuracyFlags ? accuracyScore(session.accuracyFlags, settings) : null;
 
   const parts = { pace, clarity, engagement, vocalEnergy, accuracy };

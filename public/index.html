@@ -118,6 +118,11 @@
         <button class="golive-btn" id="golive-btn" disabled>
           <span class="golive-dot"></span> GO LIVE
         </button>
+        <button class="btn upload-btn hidden" id="upload-video-btn"
+                title="Testing pipeline: run a recorded lecture (MP4) through the exact same transcription, metrics, and content-analysis passes as a live session. The video never leaves this machine — only the extracted audio goes to Whisper, and both are deleted after processing.">
+          ⬆ Upload MP4
+        </button>
+        <input type="file" id="video-input" accept="video/mp4,video/quicktime,video/webm,video/*" hidden>
         <span class="dim-note" id="golive-hint">select a mode to arm the console</span>
       </div>
     </section>
@@ -208,6 +213,7 @@
       <div class="processing-box module">
         <div class="module-label"><span class="led lit-amber"></span>Post-Session Processing</div>
         <ul class="proc-steps">
+          <li id="proc-extract" class="hidden"><span class="proc-led"></span> Video upload + audio extraction (ffmpeg) <em class="proc-status">queued</em></li>
           <li id="proc-transcribe"><span class="proc-led"></span> Precision transcript (Whisper) <em class="proc-status">queued</em></li>
           <li id="proc-factcheck"><span class="proc-led"></span> Fact-check (Claude) <em class="proc-status">queued</em></li>
           <li id="proc-scoring"><span class="proc-led"></span> Scoring <em class="proc-status">queued</em></li>
