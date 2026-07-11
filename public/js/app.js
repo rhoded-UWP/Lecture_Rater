@@ -8,8 +8,9 @@ import { SessionRecorder } from './recorder.js';
 import { SessionMetrics, countFillersFromWords, detectStutters, lectureStretches } from './metrics.js';
 import { computeScores } from './scoring.js';
 import * as store from './storage.js';
-import { drawLineChart, drawMonologueBars, drawTimelineStrip, drawSparkline, dialAngle, INK } from './charts.js';
+import { drawLineChart, drawMonologueBars, drawTimelineStrip, drawSparkline, drawAttentionChart, dialAngle, INK } from './charts.js';
 import { initDevPanel, logUsage } from './dev-panel.js';
+import { estimateAttention, blocksToMinutes } from './attention.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -420,7 +421,7 @@ async function startSession() {
     alert(err.message);
   }
 
-  live = { metrics, energy, recorder, speech, stream, recording, timer: 0, interimEl, fastSince: null };
+  live = { metrics, energy, recorder, speech, stream, recording, timer: 0, interimEl, fastSince: null, attn: [], lastAttnT: -10 };
 
   buildDial();
   $('wpm-readout').textContent = '—';
@@ -429,6 +430,8 @@ async function startSession() {
   $('nl-count').textContent = '0';
   $('recent-fillers').innerHTML = '';
   $('gap-stopwatch').textContent = '0:00';
+  $('attn-readout').textContent = '—';
+  $('attn-conf').textContent = '';
   $('pace-word').textContent = ' ';
   $('pace-word').className = 'pace-word mono';
   $('timer-lecture').textContent = '0:00';
@@ -510,6 +513,36 @@ function liveTick() {
 
   drawTimelineStrip($('timeline-strip'), t, m.nonlecture, {
     minHorizonSec: settings.lectureLengthMin * 60,
+  });
+
+  updateAttention(m, t);
+}
+
+/** Estimated Attention (attention-timeline-feature-spec.md): compute the
+ * current estimate, keep a fine-grained curve for the live chart, and draw
+ * the band + curve + dotted uninterrupted-lecture projection. */
+function updateAttention(m, t) {
+  const blocksMin = blocksToMinutes(m.nonlecture);
+  const att = estimateAttention(t / 60, blocksMin);
+
+  $('attn-readout').textContent = `${Math.round(att.score)}%`;
+  $('attn-conf').textContent = `ESTIMATE · CONFIDENCE ${att.confidence.toUpperCase()}`;
+
+  if (t - (live.lastAttnT ?? -10) >= 1) {
+    live.lastAttnT = t;
+    live.attn.push({ t, score: att.score, lower: att.lower, upper: att.upper });
+  }
+  m.sampleAttention(att.score);
+
+  const horizonSec = Math.max(settings.lectureLengthMin * 60, t * 1.15);
+  const projection = [{ t, score: att.score }];
+  for (let pt = t + 60; pt <= horizonSec; pt += 60) {
+    projection.push({ t: pt, score: estimateAttention(pt / 60, blocksMin).score });
+  }
+  drawAttentionChart($('attention-chart'), live.attn, {
+    durationSec: horizonSec,
+    blocks: m.nonlecture,
+    projection,
   });
 }
 
@@ -598,6 +631,7 @@ async function endSession() {
     timeline: {
       wpm: metrics.timeline.wpm,
       energy: metrics.timeline.energy,
+      attention: metrics.timeline.attention,
       nonlecture: metrics.nonlecture.map((b) => [Math.round(b.start), Math.round(b.end ?? durationSec)]),
       fillers: metrics.fillers.map((f) => ({ t: Math.round(f.t), word: f.word })),
       stutters: [],
@@ -913,6 +947,7 @@ function renderReport(session) {
 }
 
 function drawReportCharts(session) {
+  drawReportAttention(session);
   drawMonologueBars($('monologue-chart'), lectureStretches(session.timeline, session.durationSec), {
     warnSec: settings.monologueWarnSec,
     alertSec: settings.monologueAlertSec,
@@ -937,6 +972,32 @@ function drawReportCharts(session) {
     durationSec: session.durationSec,
     ticks: 2,
   });
+}
+
+/** Report: regenerate the attention curve at full fidelity from the saved
+ * nonlecture blocks (sessions from before this feature hide the module). */
+function drawReportAttention(session) {
+  const module = $('attention-report-module');
+  const hasData = !!session.timeline.attention?.length;
+  module.classList.toggle('hidden', !hasData);
+  if (!hasData) return;
+
+  const blocksMin = blocksToMinutes(session.timeline.nonlecture);
+  const samples = [];
+  for (let t = 0; t <= session.durationSec; t += 15) {
+    const a = estimateAttention(t / 60, blocksMin);
+    samples.push({ t, score: a.score, lower: a.lower, upper: a.upper });
+  }
+  drawAttentionChart($('attention-report-chart'), samples, {
+    durationSec: session.durationSec,
+    blocks: session.timeline.nonlecture,
+  });
+
+  const scores = samples.map((s) => s.score);
+  const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+  const lowIdx = scores.indexOf(Math.min(...scores));
+  $('attn-report-stats').textContent =
+    `instructional-time average ${Math.round(avg)}% · lowest ${Math.round(scores[lowIdx])}% at ${fmtClock(samples[lowIdx].t)}`;
 }
 
 function renderAnnotatedTranscript(session) {

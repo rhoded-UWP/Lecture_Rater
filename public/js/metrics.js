@@ -13,8 +13,9 @@ export class SessionMetrics {
     this.fillers = [];      // { t, word }
     this.nonlecture = [];   // { start, end|null } — lab activity / video blocks
     this.transcript = [];   // { t, end, text } — live (Web Speech) segments
-    this.timeline = { wpm: [], energy: [] };
+    this.timeline = { wpm: [], energy: [], attention: [] };
     this._lastSampleT = 0;
+    this._lastAttnSampleT = 0;
   }
 
   now() {
@@ -99,6 +100,14 @@ export class SessionMetrics {
     this.timeline.energy.push([Math.round(t), round2(energy)]);
   }
 
+  /** Attention samples continue through nonlecture blocks (the estimate stays
+   * visible during a generic interaction, per the attention spec). */
+  sampleAttention(score) {
+    const t = this.now();
+    if (t - this._lastAttnSampleT < this.settings.timelineSampleSec) return;
+    this._lastAttnSampleT = t;
+    this.timeline.attention.push([Math.round(t), Math.round(score)]);
+  }
 }
 
 /**

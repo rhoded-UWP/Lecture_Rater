@@ -123,6 +123,15 @@
     <section class="view" id="view-live">
       <div class="live-grid">
 
+        <div class="module attention-module" id="attention-module"
+             title="A research-informed estimate based on time, instructional mode, and classroom events. It does not directly measure individual students.">
+          <div class="module-label"><span class="led lit-green"></span>Estimated Attention
+            <span class="attn-conf mono" id="attn-conf"></span>
+            <span class="attn-readout mono" id="attn-readout">—</span>
+          </div>
+          <canvas id="attention-chart" class="attention-canvas"></canvas>
+        </div>
+
         <div class="module gauge-module">
           <div class="module-label"><span class="led lit-green"></span>Pace · WPM</div>
           <svg class="dial" id="wpm-dial" viewBox="0 0 200 158" aria-label="Words per minute dial">
@@ -220,6 +229,13 @@
       <div class="subscore-row" id="subscore-row"></div>
 
       <div class="report-grid">
+        <div class="module span2 hidden" id="attention-report-module">
+          <div class="module-label"><span class="led"></span>Estimated Attention
+            <span class="attn-conf mono" id="attn-report-stats"></span>
+          </div>
+          <canvas id="attention-report-chart" class="chart"></canvas>
+          <p class="dim-note">Research-informed estimate from time and activity pattern — it does not directly measure individual students.</p>
+        </div>
         <div class="module span2">
           <div class="module-label"><span class="led"></span>Monologue Graph — continuous lecture between nonlecture activity</div>
           <canvas id="monologue-chart" class="chart tallchart"></canvas>

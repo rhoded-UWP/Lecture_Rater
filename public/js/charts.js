@@ -179,6 +179,90 @@ export function drawTimelineStrip(canvas, nowSec, nonlecture, opts = {}) {
   }
 }
 
+/** Estimated Attention chart (attention-timeline-feature-spec.md §12,
+ * adapted to horizontal time for the live console). Draws the uncertainty
+ * band, the solid estimate curve, nonlecture blocks as shaded columns, an
+ * optional dotted "if you keep lecturing" projection, and the now-marker. */
+export function drawAttentionChart(canvas, samples, opts) {
+  const { ctx, w, h } = setup(canvas);
+  const { durationSec, blocks = [], projection = [] } = opts;
+  const padL = 34;
+  const padB = 16;
+  const padT = 6;
+  const plotW = w - padL - 8;
+  const plotH = h - padT - padB;
+  const dur = Math.max(durationSec, 60);
+  const x = (t) => padL + (t / dur) * plotW;
+  const y = (v) => padT + plotH - (v / 100) * plotH;
+
+  // grid + axis labels
+  ctx.font = '10px "IBM Plex Mono", monospace';
+  ctx.strokeStyle = INK.grid;
+  ctx.fillStyle = INK.dim;
+  ctx.textAlign = 'right';
+  for (const v of [20, 40, 60, 80]) {
+    ctx.beginPath();
+    ctx.moveTo(padL, y(v));
+    ctx.lineTo(padL + plotW, y(v));
+    ctx.stroke();
+    ctx.fillText(`${v}%`, padL - 4, y(v) + 3);
+  }
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 5; i++) {
+    const t = (dur * i) / 5;
+    ctx.fillText(mmss(t), x(t), h - 3);
+  }
+
+  // nonlecture activity blocks — shaded columns
+  for (const b of blocks) {
+    const start = b.start ?? b[0];
+    const end = (b.end !== undefined ? b.end : b[1]) ?? durationSec;
+    ctx.fillStyle = 'rgba(255,59,65,0.10)';
+    ctx.fillRect(x(start), padT, Math.max(2, x(end) - x(start)), plotH);
+    ctx.fillStyle = 'rgba(255,59,65,0.5)';
+    ctx.fillRect(x(start), padT, 1.5, plotH);
+  }
+
+  if (!samples.length) return;
+
+  // uncertainty band
+  ctx.beginPath();
+  samples.forEach((s, i) => (i === 0 ? ctx.moveTo(x(s.t), y(s.upper)) : ctx.lineTo(x(s.t), y(s.upper))));
+  for (let i = samples.length - 1; i >= 0; i--) ctx.lineTo(x(samples[i].t), y(samples[i].lower));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(79,208,140,0.10)';
+  ctx.fill();
+
+  // dotted projection: uninterrupted lecture from now to the horizon
+  if (projection.length > 1) {
+    ctx.strokeStyle = 'rgba(138,145,158,0.6)';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    projection.forEach((p, i) => (i === 0 ? ctx.moveTo(x(p.t), y(p.score)) : ctx.lineTo(x(p.t), y(p.score))));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // the estimate curve
+  ctx.strokeStyle = INK.green;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = INK.green;
+  ctx.shadowBlur = 7;
+  ctx.beginPath();
+  samples.forEach((s, i) => (i === 0 ? ctx.moveTo(x(s.t), y(s.score)) : ctx.lineTo(x(s.t), y(s.score))));
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // now-marker
+  const last = samples[samples.length - 1];
+  ctx.fillStyle = INK.green;
+  ctx.beginPath();
+  ctx.arc(x(last.t), y(last.score), 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 /** Tiny trend line for the history page. */
 export function drawSparkline(canvas, values, color = INK.amber) {
   const { ctx, w, h } = setup(canvas);
