@@ -12,10 +12,28 @@
 import express from 'express';
 import multer from 'multer';
 import { readdir, readFile, unlink } from 'fs/promises';
+import { readFileSync } from 'fs';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+// Load .env if present (local development). Built-in so it works on any Node
+// version and any host — no flags, no dependency. Real env vars (e.g. from
+// the Render dashboard) always win; .env only fills in what's unset.
+{
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  try {
+    for (const line of readFileSync(path.join(dir, '.env'), 'utf8').split('\n')) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+      if (!m || line.trim().startsWith('#')) continue;
+      const val = m[2].replace(/^["']|["']$/g, '');
+      if (val && !(m[1] in process.env)) process.env[m[1]] = val;
+    }
+  } catch {
+    /* no .env — env vars come from the host (Render) */
+  }
+}
 
 import {
   TRANSCRIPTION_PROVIDERS,
