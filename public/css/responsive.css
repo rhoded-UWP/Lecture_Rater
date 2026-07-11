@@ -1,0 +1,73 @@
+/* ==========================================================================
+   10 of 10 · responsive.css — ALL width breakpoints, in one place
+   This file loads LAST on purpose: several rules here re-declare sizes at
+   the same specificity as the base rules in other files, and later-in-
+   cascade must win. If you add a new width breakpoint, add it here.
+
+   Breakpoints:
+     ≥1600px  — 16:9 classroom monitor upgrade (optimal at 1920×1080)
+     ≤980px   — tablet: single/double columns
+     ≤560px   — phone: single column
+   See base.css for the full file map.
+   ========================================================================== */
+
+/* 16:9 control-room layout — optimal at 1920×1080. The attention graph owns
+   row 1; gauges form a 2×2 block; the live transcript becomes a tall caption
+   monitor on the right; every readout scales up for across-the-classroom
+   glanceability. */
+@media (min-width: 1600px) {
+  .live-grid {
+    grid-template-columns: 1fr 1fr 1.55fr;
+    grid-template-rows: auto 1fr 1fr;
+    gap: 20px;
+  }
+  .attention-module { grid-row: 1; }
+  .attention-canvas { height: 170px; }
+  .attn-readout { font-size: 32px; }
+  .transcript-module {
+    grid-column: 3;
+    grid-row: 2 / 4;
+    display: flex;
+    flex-direction: column;
+  }
+  .transcript-module .transcript-scroll {
+    flex: 1;
+    height: auto;
+    min-height: 320px;
+    font-size: 21px;
+    line-height: 1.8;
+  }
+  .gauge-module { justify-content: space-between; }
+  .dial { max-width: 280px; }
+  .readout { font-size: 58px; }
+  .readout.huge { font-size: 92px; }
+  .readout-unit { font-size: 13px; }
+  .pace-word { font-size: 17px; }
+  .vu-track.tall { height: 40px; }
+  .timeline-strip { height: 64px; }
+  .interaction-btn { font-size: 32px; min-height: 92px; }
+  .timer-stack { min-width: 150px; }
+  .timer-row { font-size: 18px; }
+  .timer-row.total { font-size: 20px; }
+
+  .chart { height: 220px; }
+  .chart.tallchart { height: 280px; }
+  .subscore .sub-value { font-size: 42px; }
+  .transcript-full { max-height: 540px; }
+}
+
+/* tablet */
+@media (max-width: 980px) {
+  .setup-grid, .report-grid, .history-top { grid-template-columns: 1fr; }
+  .live-grid { grid-template-columns: 1fr 1fr; }
+  .subscore-row { grid-template-columns: repeat(2, 1fr); }
+  .console-header { flex-wrap: wrap; gap: 12px; }
+  .tabs { order: 3; margin-left: 0; }
+}
+
+/* phone */
+@media (max-width: 560px) {
+  .live-grid { grid-template-columns: 1fr; }
+  .live-controls { flex-wrap: wrap; }
+  .interaction-btn { font-size: 20px; }
+}

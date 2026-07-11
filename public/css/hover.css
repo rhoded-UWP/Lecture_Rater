@@ -1,0 +1,85 @@
+/* ==========================================================================
+   4 of 9 · hover.css — pointer-aware interactivity
+   The console senses the mouse: the module under the cursor lifts, sharpens
+   its contrast, lights its LED, and carries a soft spotlight that follows
+   the pointer (--mx/--my are set per-module by a pointermove listener in
+   app.js). Everything here is wrapped in @media (hover: hover) so touch
+   devices never get sticky hover states.
+
+   NOTE: dev-panel.css deliberately loads AFTER this file and opts the
+   Developer Tools modal out of this whole treatment.
+   See base.css for the full file map.
+   ========================================================================== */
+
+@media (hover: hover) {
+  .module {
+    position: relative;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+
+  /* cursor-tracking spotlight */
+  .module::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    background: radial-gradient(
+      300px circle at var(--mx, 50%) var(--my, 40%),
+      rgba(255, 180, 84, 0.08),
+      transparent 65%
+    );
+  }
+
+  .module:hover {
+    transform: translateY(-2px) scale(1.008);
+    border-color: #3d4653;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 12px 30px rgba(0, 0, 0, 0.55),
+      0 0 24px rgba(255, 180, 84, 0.07);
+  }
+  .module:hover::after { opacity: 1; }
+
+  /* contrast boost + LED light-up on the hovered module */
+  .module:hover > .module-label,
+  .module:hover > summary.module-label { color: var(--ink); }
+  .module:hover .led:not(.lit-green):not(.lit-amber) {
+    background: var(--amber);
+    box-shadow: var(--glow-amber);
+  }
+  .module:hover .dim-note { color: var(--dim); }
+  .module:hover .obj-title,
+  .module:hover .setting-field label { color: var(--dim); }
+
+  /* element-level hover states */
+  .mode-card,
+  .type-btn,
+  .session-row,
+  .subscore {
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+  .mode-card:hover {
+    transform: scale(1.015);
+    background: #141924;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+  .mode-card:hover .mode-sub { color: var(--ink); }
+  .type-btn:hover:not(.active) { color: var(--ink); border-color: var(--dim); transform: scale(1.015); }
+  .session-row:hover {
+    transform: translateY(-1px) scale(1.006);
+    border-color: #3d4653;
+    background: #131824;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  }
+  .subscore:hover {
+    transform: translateY(-2px);
+    border-color: #3d4653;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  }
+  .records-list li:hover,
+  .flag-list li:hover,
+  .data-table tr:hover td { background: rgba(255, 255, 255, 0.025); }
+}

@@ -1,0 +1,163 @@
+/* ==========================================================================
+   7 of 9 · report.css — the post-session Session Report screen
+   Contents: report header + headline score, delta arrows, five subscore
+   tiles, report grid, chart canvases, pace time-in-zone chips, accuracy
+   flags, annotated transcript, action buttons.
+   (The report's filler table uses .data-table from components.css; its
+   objectives list uses .obj-list from setup.css.)
+   See base.css for the full file map.
+   ========================================================================== */
+
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+.report-meta { color: var(--dim); font-size: 14px; line-height: 1.8; }
+.headline-score { text-align: right; }
+
+/* score movement vs the previous session */
+.delta { font-size: 14px; letter-spacing: 0.05em; }
+.delta.up { color: var(--green); }
+.delta.down { color: var(--rec-red); }
+
+/* ------------------------------------------------------ subscore tiles */
+
+.subscore-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.subscore {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 14px;
+  text-align: center;
+}
+.subscore .sub-name {
+  font-family: var(--font-label);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.subscore .sub-value {
+  font-family: var(--font-mono);
+  font-size: 34px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin: 4px 0;
+}
+.subscore .sub-bar {
+  height: 5px;
+  background: #0d1014;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.subscore .sub-bar-fill { height: 100%; border-radius: 3px; }
+
+/* ------------------------------------------------------- report layout */
+
+.report-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+}
+.report-grid .span2 { grid-column: 1 / -1; }
+
+/* chart canvases (drawn by charts.js) */
+.chart { width: 100%; height: 180px; display: block; }
+.chart.tallchart { height: 220px; }
+
+/* time-in-zone breakdown chips under the pace chart */
+.pace-zones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.pace-zones .pz-chip { display: inline-flex; align-items: center; gap: 6px; }
+.pace-zones .pz-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* --------------------------------------------------- stutter/flag list */
+
+.flag-list { list-style: none; font-size: 14.5px; }
+.flag-list li { padding: 9px 4px; border-bottom: 1px solid rgba(38,43,51,0.5); }
+.flag-list .t { font-family: var(--font-mono); color: var(--faint); font-size: 12.5px; margin-right: 10px; }
+.flag-list .kind {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 1px 6px;
+  margin-right: 8px;
+  color: var(--dim);
+}
+
+/* ------------------------------------------------ accuracy flag cards */
+
+.acc-flag {
+  border-left: 3px solid var(--dim);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: rgba(255,255,255,0.02);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.acc-flag.high { border-left-color: var(--rec-red); }
+.acc-flag.medium { border-left-color: var(--amber); }
+.acc-flag.low { border-left-color: var(--cyan); }
+.acc-flag blockquote { font-style: italic; color: var(--ink); margin-bottom: 6px; }
+.acc-flag .acc-exp { color: var(--dim); font-size: 14px; }
+.acc-flag .sev {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-right: 8px;
+}
+.acc-flag.high .sev { color: var(--rec-red); }
+.acc-flag.medium .sev { color: var(--amber); }
+.acc-flag.low .sev { color: var(--cyan); }
+
+/* ------------------------------------------------ annotated transcript */
+
+.transcript-full {
+  max-height: 420px;
+  overflow-y: auto;
+  font-size: 15.5px;
+  line-height: 1.9;
+  color: var(--ink);
+  padding-right: 8px;
+}
+.transcript-full .seg-t {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
+  margin-right: 8px;
+  user-select: none;
+}
+.transcript-full .interaction-mark {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--cyan);
+  border: 1px dashed rgba(110,194,232,0.5);
+  border-radius: 3px;
+  padding: 1px 8px;
+  margin: 0 6px;
+}
+.transcript-full .acc-mark { color: var(--rec-red); border-bottom: 1px dotted var(--rec-red); cursor: help; }
+.transcript-full p { margin-bottom: 10px; }
+
+.report-actions { display: flex; gap: 12px; margin: 6px 0 30px; }

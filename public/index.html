@@ -8,7 +8,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/studio.css">
+  <!-- Stylesheets load in cascade order — see the file map in base.css.
+       responsive.css must stay LAST; dev-panel.css must follow hover.css. -->
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/hover.css">
+  <link rel="stylesheet" href="css/setup.css">
+  <link rel="stylesheet" href="css/live.css">
+  <link rel="stylesheet" href="css/report.css">
+  <link rel="stylesheet" href="css/history.css">
+  <link rel="stylesheet" href="css/dev-panel.css">
+  <link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>

@@ -1,0 +1,98 @@
+/* ==========================================================================
+   LECTURE COACH — Broadcast Studio / ON AIR design system
+   1 of 9 · base.css — design tokens, reset, page background, utilities
+
+   FILE MAP (load order matters — index.html loads them in this order):
+     1. base.css        tokens (:root), reset, body, scanlines, utilities
+     2. layout.css      header, ON AIR lamp, nav tabs, view shells, footer
+     3. components.css  module panels, LEDs, buttons, meters, tables, switch
+     4. hover.css       pointer-aware hover treatment (lift + spotlight)
+     5. setup.css       Session Setup screen (modes, toggles, objectives…)
+     6. live.css        Live dashboard + post-session processing screen
+     7. report.css      Session report screen
+     8. history.css     History screen
+     9. dev-panel.css   Developer Tools modal (loads after hover.css —
+                        it overrides the hover treatment)
+    10. responsive.css  ALL width media queries — loads LAST so its
+                        equal-specificity overrides win. Edit sizes there.
+
+   STYLE RULES OF THE HOUSE:
+   - Dark control-room console. Recording-red is RESERVED for the mic-hot /
+     not-recording states — never use it as a decorative accent.
+   - Labels: Barlow Condensed (uppercase, letterspaced).
+     Readouts: IBM Plex Mono. Body: Barlow.
+   - Always use the CSS variables below for colors; no new raw hex values
+     for things the tokens already cover.
+   ========================================================================== */
+
+:root {
+  --bg: #0b0d10;
+  --panel: #14171c;
+  --panel-2: #181c22;
+  --edge: #262b33;
+  --edge-hi: rgba(255, 255, 255, 0.05);
+  --ink: #e8e6e0;
+  --dim: #8a919e;
+  --faint: #5a616c;
+
+  --rec-red: #ff3b41;          /* ON AIR + mic-hot ONLY */
+  --amber: #ffb454;            /* readouts, warm accent */
+  --green: #4fd08c;            /* good / in-band */
+  --cyan: #6ec2e8;             /* informational (timeline talk bar) */
+
+  --glow-red: 0 0 18px rgba(255, 59, 65, 0.55);
+  --glow-amber: 0 0 10px rgba(255, 180, 84, 0.35);
+
+  --font-label: "Barlow Condensed", sans-serif;
+  --font-body: "Barlow", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+
+  --radius: 6px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  background:
+    radial-gradient(ellipse 120% 90% at 50% -20%, #14181f 0%, var(--bg) 55%),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+/* faint CRT scanline + vignette atmosphere (z-index 999; dev overlay sits
+   above it at 1001, the nonlecture red frame below it at 998) */
+.scanlines {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.35) 100%);
+  mix-blend-mode: overlay;
+}
+
+/* utilities */
+.mono { font-family: var(--font-mono); }
+.hidden { display: none !important; }
+
+/* scrollbars in the console style */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: #0d1014; }
+::-webkit-scrollbar-thumb { background: #2a3038; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #3a424d; }
+
+/* accessibility: kill all motion when the user asks (uses !important, so
+   it wins regardless of file order) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
