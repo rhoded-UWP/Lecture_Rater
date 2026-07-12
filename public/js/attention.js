@@ -24,15 +24,39 @@ export const ATTENTION = {
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-// Spec §5.3 — piecewise logistic baseline for uninterrupted presentation.
+// Spec §5.3 — piecewise logistic baseline for uninterrupted presentation:
+//   B(m) = 1.236 − 0.052·min(m, 30) − 0.015·max(0, m − 30)
+// Coefficients are research-derived in the spec; change them there first.
+const BASELINE = {
+  intercept: 1.236,         // logit at minute 0 (≈ 77% attention)
+  declinePerMin: 0.052,     // logit lost per minute over the first 30 min
+  lateDeclinePerMin: 0.015, // slower decline once fatigue has set in
+  kneeMin: 30,              // minute where the decline rate changes
+};
+
 export function baselineLogit(effectiveMinutes) {
   const m = Math.max(0, effectiveMinutes);
-  return 1.236 - 0.052 * Math.min(m, 30) - 0.015 * Math.max(0, m - 30);
+  return (
+    BASELINE.intercept -
+    BASELINE.declinePerMin * Math.min(m, BASELINE.kneeMin) -
+    BASELINE.lateDeclinePerMin * Math.max(0, m - BASELINE.kneeMin)
+  );
 }
 
 // Spec §5.8 — band widens as the model extrapolates past 30 effective min.
+const UNCERTAINTY = {
+  baseWidthPts: 8,           // ± points on a fresh estimate
+  growthPerMin: 0.35,        // widening per extrapolated minute past the knee
+  maxWidthPts: 20,           // never wider than ±20
+  extrapolateAfterMin: 30,
+};
+
 export function uncertaintyWidth(effectiveMinutes) {
-  return Math.min(20, 8 + Math.max(0, effectiveMinutes - 30) * 0.35);
+  return Math.min(
+    UNCERTAINTY.maxWidthPts,
+    UNCERTAINTY.baseWidthPts +
+      Math.max(0, effectiveMinutes - UNCERTAINTY.extrapolateAfterMin) * UNCERTAINTY.growthPerMin
+  );
 }
 
 /**

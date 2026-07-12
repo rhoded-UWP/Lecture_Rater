@@ -2,6 +2,16 @@
 // energy samples; maintains the live gauges' numbers and the timeline arrays
 // that end up in the saved-session JSON.
 
+// Rolling-gauge tuning (all in lecture-clock seconds):
+const WPM_WARMUP_SEC = 5;            // no WPM reading until this much lecture time exists
+const WPM_MIN_WINDOW_SEC = 15;       // rolling window floor while the session is young
+const FILLER_WINDOW_MIN_SEC = 30;    // filler-rate window floor…
+const FILLER_WINDOW_MAX_SEC = 180;   // …and its cap ("last 3 minutes")
+// Web Speech delivers ~sentence-sized chunks with one end timestamp; spread
+// word times back across the chunk so rolling windows don't see one burst:
+const WORD_SPREAD_SEC_EACH = 0.4;    // assumed seconds of speech per word…
+const WORD_SPREAD_MAX_SEC = 4;       // …capped so long chunks don't smear too far back
+
 export class SessionMetrics {
   constructor(settings, fillerList) {
     this.settings = settings;
@@ -26,9 +36,7 @@ export class SessionMetrics {
   addFinal(text, tSec) {
     const tokens = tokenize(text);
     if (!tokens.length) return [];
-    // Spread word timestamps evenly across the ~3s the chunk covers so the
-    // rolling WPM window doesn't see them as one burst.
-    const span = Math.min(tokens.length * 0.4, 4);
+    const span = Math.min(tokens.length * WORD_SPREAD_SEC_EACH, WORD_SPREAD_MAX_SEC);
     tokens.forEach((_, i) => {
       this.words.push({ t: tSec - span + (span * (i + 1)) / tokens.length });
     });
@@ -91,8 +99,8 @@ export class SessionMetrics {
    * window on the lecture clock resumes at the pre-activity pace instead. */
   currentWpm() {
     const lNow = this.lectureTimeAt(this.now());
-    if (lNow < 5) return 0;
-    const windowSec = Math.max(15, Math.min(this.settings.wpmWindowSec, lNow));
+    if (lNow < WPM_WARMUP_SEC) return 0;
+    const windowSec = Math.max(WPM_MIN_WINDOW_SEC, Math.min(this.settings.wpmWindowSec, lNow));
     const cutoff = lNow - windowSec;
     let n = 0;
     for (let i = this.words.length - 1; i >= 0 && this.lectureTimeAt(this.words[i].t) >= cutoff; i--) n++;
@@ -102,7 +110,7 @@ export class SessionMetrics {
   /** Fillers per minute over the last 3 minutes of lecture time. */
   currentFillerRate() {
     const lNow = this.lectureTimeAt(this.now());
-    const windowSec = Math.max(30, Math.min(180, lNow));
+    const windowSec = Math.max(FILLER_WINDOW_MIN_SEC, Math.min(FILLER_WINDOW_MAX_SEC, lNow));
     const cutoff = lNow - windowSec;
     const n = this.fillers.filter((f) => this.lectureTimeAt(f.t) >= cutoff).length;
     return (n * 60) / windowSec;

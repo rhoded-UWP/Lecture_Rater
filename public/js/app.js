@@ -153,9 +153,14 @@ document.querySelectorAll('#pace-toggle .type-btn').forEach((btn) => {
 syncPaceToggle();
 
 // lecture length selector (50 / 75 / custom minutes)
+// Must match the .len-btn data-min values in index.html — the buttons are
+// the UI, this list is the logic; change both together.
+const LECTURE_LENGTH_PRESETS_MIN = [50, 75];
+const CUSTOM_LENGTH_START_MIN = 60; // starting value when switching to Custom
+
 function syncLengthButtons() {
   const min = settings.lectureLengthMin;
-  const isPreset = min === 50 || min === 75;
+  const isPreset = LECTURE_LENGTH_PRESETS_MIN.includes(min);
   document.querySelectorAll('.len-btn').forEach((b) => {
     b.classList.toggle(
       'active',
@@ -169,8 +174,8 @@ function syncLengthButtons() {
 document.querySelectorAll('.len-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (btn.dataset.min === 'custom') {
-      if (settings.lectureLengthMin === 50 || settings.lectureLengthMin === 75) {
-        settings.lectureLengthMin = 60; // starting point for custom entry
+      if (LECTURE_LENGTH_PRESETS_MIN.includes(settings.lectureLengthMin)) {
+        settings.lectureLengthMin = CUSTOM_LENGTH_START_MIN;
       }
     } else {
       settings.lectureLengthMin = Number(btn.dataset.min);
@@ -1151,16 +1156,21 @@ function hookDeepRun(session) {
   $('deep-run-btn')?.addEventListener('click', () => runDeepAnalysis(session));
 }
 
-/** Rough pre-run estimate: chars/4 ≈ tokens, plus prompt overhead and a
- * typical response size, priced from the active deep-analysis model. */
+// Pre-run cost-estimate assumptions. Rough by design — the label says "~".
+// Actual cost is computed server-side from real token usage after the run.
+const EST_CHARS_PER_TOKEN = 4;            // common English-text approximation
+const EST_TIMESTAMP_CHARS_PER_SEG = 10;   // "[mm:ss] " prefix added to each segment
+const EST_PROMPT_OVERHEAD_TOKENS = 1500;  // instructions + mode context + outcome lists
+const EST_OUTPUT_TOKENS = 2500;           // typical deep-analysis JSON response
+
+/** Rough pre-run estimate, priced from the active deep-analysis model. */
 async function deepCostEstimate(session) {
   const cfg = await fetchAiSettings(true); // refresh — dev panel may have switched models
   const m = cfg?.analysisModels?.find((x) => x.id === cfg.settings.deepAnalysisModelId);
   if (!m) return null;
-  const chars = session.transcript.reduce((s, seg) => s + seg.text.length + 10, 0);
-  const inTok = Math.round(chars / 4) + 1500;
-  const outTok = 2500;
-  const cost = (inTok / 1e6) * m.pricing.inPerM + (outTok / 1e6) * m.pricing.outPerM;
+  const chars = session.transcript.reduce((s, seg) => s + seg.text.length + EST_TIMESTAMP_CHARS_PER_SEG, 0);
+  const inTok = Math.round(chars / EST_CHARS_PER_TOKEN) + EST_PROMPT_OVERHEAD_TOKENS;
+  const cost = (inTok / 1e6) * m.pricing.inPerM + (EST_OUTPUT_TOKENS / 1e6) * m.pricing.outPerM;
   return { cost: Math.max(cost, 0.01), modelLabel: m.label + (m.approxPricing ? ' (approx. pricing)' : '') };
 }
 

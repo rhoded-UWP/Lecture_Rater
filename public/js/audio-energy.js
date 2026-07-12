@@ -10,6 +10,9 @@ const PITCH_MAX_HZ = 400;
 const VOICE_RMS_THRESHOLD = 0.015; // below this we treat the frame as silence
 const PITCH_STD_REF = 3.0;         // semitone stddev that maps to "fully dynamic"
 const VOL_STD_REF = 0.35;          // relative RMS stddev that maps to "fully dynamic"
+const MIC_METER_GAIN = 8;          // scales raw RMS so normal speech rides the upper half of the mic-check meter
+const SEMITONES_PER_OCTAVE = 12;   // music-theory constant for Hz → semitone conversion
+const A4_HZ = 440;                 // concert-pitch reference (semitone 0)
 
 export class EnergyAnalyzer {
   constructor() {
@@ -45,12 +48,12 @@ export class EnergyAnalyzer {
     let sum = 0;
     for (let i = 0; i < this.buf.length; i++) sum += this.buf[i] * this.buf[i];
     const rms = Math.sqrt(sum / this.buf.length);
-    this.level = Math.min(1, rms * 8);
+    this.level = Math.min(1, rms * MIC_METER_GAIN);
 
     let semitone = null;
     if (rms > VOICE_RMS_THRESHOLD) {
       const hz = this._detectPitch(this.buf, this.ctx.sampleRate);
-      if (hz) semitone = 12 * Math.log2(hz / 440);
+      if (hz) semitone = SEMITONES_PER_OCTAVE * Math.log2(hz / A4_HZ);
     }
 
     this.frames.push({ t, rms, semitone });

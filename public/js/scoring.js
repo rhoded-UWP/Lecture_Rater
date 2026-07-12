@@ -4,6 +4,17 @@
 import { lectureStretches } from './metrics.js';
 import { classifyWpm, PACE_ZONES } from './config.js';
 
+// Scoring-model shape constants. These define HOW penalties scale — the
+// user-tunable thresholds they interact with (targets, alert lengths,
+// floors, weights) stay in settings per the rule above.
+const MIN_SCOREABLE_SEC = 30;          // shorter sessions score 0 engagement — too little signal
+const AVG_STRETCH_PENALTY_SCALE = 50;  // points lost when avg stretch reaches 2× the target gap
+const MARATHON_POINTS_PER_MIN = 8;     // per minute the longest stretch runs past the alert length
+const UNBROKEN_LECTURE_CAP = 25;       // score ceiling when an alert-length class had zero breaks
+const ENERGY_FULL_MARKS_SCALE = 120;   // mean energy × 120 → 0.83+ (≈5/6 dynamic) earns 100
+const MONOTONE_PENALTY_STEP_SEC = 30;  // penalty accrues per this much time below the energy floor…
+const MONOTONE_POINTS_PER_STEP = 5;    // …costing this many points per step
+
 export function computeScores(session, settings) {
   // Per-minute rates use lecture time only — nonlecture activity doesn't count.
   const durationMin = Math.max((session.lectureSec ?? session.durationSec) / 60, 0.5);
@@ -75,7 +86,7 @@ function clarityScore(session, durationMin, s) {
 // cost extra.
 function engagementScore(session, s) {
   const dur = session.durationSec;
-  if (dur < 30) return 0;
+  if (dur < MIN_SCOREABLE_SEC) return 0;
   const stretches = lectureStretches(session.timeline, dur).map((g) => g.len);
   if (!stretches.length) return 0;
 
@@ -85,13 +96,13 @@ function engagementScore(session, s) {
 
   let score = 100;
   if (avgStretch > s.targetInteractionGapSec) {
-    score -= ((avgStretch - s.targetInteractionGapSec) / s.targetInteractionGapSec) * 50;
+    score -= ((avgStretch - s.targetInteractionGapSec) / s.targetInteractionGapSec) * AVG_STRETCH_PENALTY_SCALE;
   }
   if (longest > s.monologueAlertSec) {
-    score -= ((longest - s.monologueAlertSec) / 60) * 8; // 8 points per extra minute
+    score -= ((longest - s.monologueAlertSec) / 60) * MARATHON_POINTS_PER_MIN;
   }
   if (breaks === 0 && dur > s.monologueAlertSec) {
-    score = Math.min(score, 25); // a whole class of unbroken lecture
+    score = Math.min(score, UNBROKEN_LECTURE_CAP); // a whole class of unbroken lecture
   }
   return clamp100(score);
 }
@@ -101,7 +112,7 @@ function energyScore(energyTimeline, s) {
   if (!energyTimeline.length) return 0;
   const values = energyTimeline.map(([, e]) => e);
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  let score = Math.round(mean * 120); // 0.83+ average = full marks
+  let score = Math.round(mean * ENERGY_FULL_MARKS_SCALE);
 
   let stretch = 0;
   let worst = 0;
@@ -111,7 +122,9 @@ function energyScore(energyTimeline, s) {
     stretch = e < s.energyFloor ? stretch + dt : 0;
     worst = Math.max(worst, stretch);
   }
-  if (worst > s.monotoneStretchSec) score -= Math.round((worst - s.monotoneStretchSec) / 30) * 5;
+  if (worst > s.monotoneStretchSec) {
+    score -= Math.round((worst - s.monotoneStretchSec) / MONOTONE_PENALTY_STEP_SEC) * MONOTONE_POINTS_PER_STEP;
+  }
   return clamp100(score);
 }
 
