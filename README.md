@@ -2,7 +2,7 @@
 
 A web app that listens to you teach — live in the classroom or in rehearsal — and coaches your lecture delivery. It transcribes as you speak, tracks pace, filler words, stutters, and vocal energy, graphs continuous lecture time between nonlecture activities, and fact-checks what you told them afterward.
 
-**Status:** Built — Phase 1 complete; Phase 2/3 server routes implemented (activate by setting API keys)
+**Status:** Built through Phase 5 — live dashboard, precision transcription (verbatim disfluencies), fact-check, scoring, swappable AI providers (dev panel), and on-demand deep analysis with learning-outcome alignment
 **User:** Single user (Dan), no accounts, no auth, mic only — no video, no stored recordings.
 
 ### Running locally
@@ -18,9 +18,9 @@ To enable the AI passes, copy `.env.example` to `.env` and paste in whichever ke
 
 | Variable | Enables |
 |---|---|
-| `OPENAI_API_KEY` | Whisper precision transcript, stutter/restart detection |
+| `ASSEMBLYAI_API_KEY` | AssemblyAI precision transcript — the default; verbatim fillers/stutters |
+| `OPENAI_API_KEY` | Whisper as the alternative transcription provider |
 | `ANTHROPIC_API_KEY` | Claude fact-check + deep analysis |
-| `ASSEMBLYAI_API_KEY` | AssemblyAI as an alternative transcription provider |
 | `DEEPSEEK_API_KEY` | DeepSeek as an alternative (budget) analysis provider |
 | `MOONSHOT_API_KEY` | Kimi K2 as an alternative analysis provider |
 
@@ -48,20 +48,21 @@ DeepSeek and Kimi share one OpenAI-compatible adapter, so most new chat APIs are
 | Back end | Node.js + Express | Serves static front end + API routes |
 | Hosting | Render (single web service) | API keys in Render environment variables |
 | Live transcription | **Web Speech API** (browser, free) | Drives all live/real-time features; Chrome required |
-| Precision transcription | **OpenAI Whisper API** (post-session) | Word-level timestamps for stutter/tic analysis (~$0.36/hr of audio) |
-| Fact-checking | **Claude API** (post-session batch) | Reviews transcript against the active mode's content file |
+| Precision transcription | **AssemblyAI** (default, `disfluencies: true`) or **Whisper** — swappable in the dev panel | Word-level timestamps; AssemblyAI transcribes fillers/repetitions/part-word stutters verbatim (~$0.35–0.37/hr either way) |
+| Fact-checking | Swappable analysis model — default **Claude Haiku 4.5** | Reviews transcript against the active mode's content file after every session |
+| Deep analysis | Swappable analysis model — default **Claude Opus 4.8** | Manual, button-triggered: thorough content review + learning-outcome alignment |
 | Vocal tone analysis | Web Audio API (in browser, free) | Pitch variance + volume dynamics, computed locally in real time |
 | Storage | Browser `localStorage` + JSON file export | Nothing persisted server-side (Render disk is ephemeral anyway) |
 
 ### Why the hybrid transcription?
 
-- **Web Speech API** is free and real-time, but it auto-cleans speech — it tends to silently drop "um"s and repeated words, which is exactly what we want to count.
-- **Whisper** gives an accurate transcript with word-level timestamps, ideal for detecting stutters, restarts, and hesitations — but it's batch, not live.
-- So: Web Speech powers the **live dashboard**; the browser also records audio locally during the session, and when you hit *End Session*, uploads it once for the Whisper precision pass. The final report is built from the Whisper transcript.
+- **Web Speech API** is free and real-time, but it auto-cleans speech — it tends to silently drop "um"s and repeated words, which is exactly what we want to count. Live counts are therefore a floor, not a total.
+- The **precision pass** (AssemblyAI by default, with its disfluency model on) gives an accurate word-timestamped transcript *including* fillers, repetitions, and part-word stutters — but it's batch, not live. (Whisper is the selectable alternative; it's primed with a verbatim prompt but still cleans away many disfluencies.)
+- So: Web Speech powers the **live dashboard**; the browser also records audio locally during the session, and when you hit *End Session*, uploads it once for the precision pass. The final report is built from the precision transcript.
 
 ### Audio handling rule (non-negotiable)
 
-Audio is recorded **in the browser only**, uploaded **once** to the Express server, forwarded to Whisper, and **deleted immediately** after transcription returns. No recording is ever stored on the server or in the saved session data. The saved artifact is transcript + metrics only.
+Audio is recorded **in the browser only**, uploaded **once** to the Express server, forwarded to the active transcription provider, and **deleted immediately** after transcription returns. No recording is ever stored on the server or in the saved session data. The saved artifact is transcript + metrics only.
 
 ---
 
@@ -69,12 +70,9 @@ Audio is recorded **in the browser only**, uploaded **once** to the Express serv
 
 ### Sessions
 
-A session starts when you arm the mic and ends when you stop it. At session start you choose:
+A session starts when you arm the mic and ends when you stop it. At session start you choose a **Mode** — the course being taught. Three ship today: *Default — Any Subject*, *CS1010 - Intro to Computer Science*, and *CS1430 - Intro to Programming*.
 
-1. **Mode** — the subject being taught (v1 ships with *Intro to Python* only).
-2. **Session type** — `Rehearsal` or `Live Classroom`.
-
-Rehearsal is you practicing alone. Live is a real class with real students — which changes the privacy rules (see below).
+(The Rehearsal / Live Classroom toggle was removed — all sessions currently record as rehearsal. The stricter Live-mode privacy code paths remain in the codebase should classroom mode return; see Privacy below.)
 
 ### Modes
 
@@ -83,29 +81,33 @@ A mode is a content/context file, one per subject, stored in the repo at `modes/
 ```json
 {
   "id": "intro-python",
-  "title": "Intro to Python",
+  "title": "CS1430 - Intro to Programming",
   "subject": "Python programming for first-time programmers",
   "level": "intro",
   "strictness": "Flag statements that are wrong, and oversimplifications likely to cause misconceptions later. Do not flag reasonable pedagogical simplification.",
   "topics": ["variables", "types", "strings", "input/print", "conditionals", "loops", "functions", "lists"],
+  "learningOutcomes": [
+    "Develop algorithms to solve \"computer-solvable\" problems",
+    "Translate algorithms to computer programs",
+    "…the course's official SLOs, one per line…"
+  ],
   "misconceptionTraps": [
     "Confusing = (assignment) with == (comparison)",
-    "Saying variables 'store' values vs. referencing objects — fine at intro level, don't flag",
     "input() returns a string — forgetting to mention casting"
   ]
 }
 ```
 
-Adding a future mode = adding a file. The mode selector reads whatever files exist. No code changes.
+Adding a future mode = adding a file. The mode selector reads whatever files exist. No code changes. `learningOutcomes` holds the course's official SLOs — they pre-fill the setup screen's outcomes box on mode selection and feed the deep-analysis alignment.
 
 ### Learning objectives & outcomes
 
 The Session Setup console accepts two optional lists, typed in or uploaded as `.txt`/`.md` (one per line) or `.json` (array of strings):
 
 1. **Lecture objectives** — what this session is supposed to teach. Drafted per session.
-2. **Student learning outcomes (SLOs)** — for the entire course. Saved per mode and reloaded whenever that mode is selected.
+2. **Student learning outcomes (SLOs)** — for the entire course. Pre-filled from the mode file's `learningOutcomes` on selection; local edits are saved per mode and win over the defaults (clear the box to restore them).
 
-Both lists are stored locally and attached to every saved session (`learningObjectives`, `courseOutcomes`), so the data is already in place for the planned AI coverage analysis (see Build Phases): using the transcript to determine **how much time was spent on each learning objective** and to summarize **how much related content was relayed, and how accurately** — both for a single lecture and cumulatively across the course's sessions.
+Both lists attach to every saved session (`learningObjectives`, `courseOutcomes`) and feed the report's **Deep Analysis** pass, which judges each objective/outcome covered / partial / missed with timestamped evidence, estimated minutes spent, and an accuracy comment. Cumulative rollup across a course's sessions is still future work.
 
 ### Nonlecture activity tracking
 
@@ -119,12 +121,12 @@ While a nonlecture block is open, the app is **not recording**: speech recogniti
 
 | Metric | Source | Live? |
 |---|---|---|
-| **Speaking pace (WPM)** | Web Speech word count over a rolling 30 s window, classified into research-based bands (see *Pacing scale* below) | ✅ live gauge |
-| **Filler words & verbal tics** | Auto-detected against a built-in filler list (`um, uh, like, you know, so, right?, okay?`; extensible in `config.js`) | ✅ live counter (Web Speech catches some), final counts from Whisper |
-| **Stutters & restarts** | Whisper word timestamps: repeated words ("the the"), abandoned sentence restarts, long mid-sentence hesitations | ❌ post-session only |
+| **Speaking pace (WPM)** | Word count over a rolling window measured in **lecture time only** (nonlecture blocks don't dilute the rate), classified into research-based bands (see *Pacing scale* below) | ✅ live gauge |
+| **Filler words & verbal tics** | Auto-detected against a built-in filler list (`um, uh, like, you know, so, right?, okay?`; extensible in Scoring Settings) | ✅ live counter (a floor — Web Speech drops many), final counts from the verbatim precision transcript |
+| **Stutters & restarts** | Precision-transcript word timestamps: repeated words ("the the"), part-word stutters ("th-that"), abandoned restarts, long mid-sentence hesitations | ❌ post-session only |
 | **Vocal energy / tone** | Web Audio API: pitch variance (monotone detection) + volume dynamics, computed locally | ✅ live meter |
 | **Lecture vs nonlecture time** | Nonlecture toggle events — lecture/activity/total timers, longest continuous lecture stretch, stretch trend across the class | ✅ live timeline + timers |
-| **Accuracy** | Claude reviews the Whisper transcript against the mode file; each flagged claim gets a quote, an explanation, and a severity | ❌ post-session only |
+| **Accuracy** | The active fact-check model reviews the precision transcript against the mode file; each flagged claim gets a quote, an explanation, and a severity | ❌ post-session only |
 
 ---
 
@@ -155,16 +157,16 @@ Every session ends with **five 0–100 subscores and one headline score**:
 | **Vocal Energy** | Pitch/volume variance — monotone stretches cost points |
 | **Accuracy** | Count and severity of fact-check flags |
 
-Headline score = weighted average (weights configurable in a settings panel; defaults TBD during build). Scores are stored per session so you can **beat your last lecture** — trend lines across sessions are a v1 feature of the history page.
+Headline score = weighted average (weights and thresholds live in the **Scoring Settings** panel). Scores are stored per session so you can **beat your last lecture** — trend lines across sessions live on the history page.
 
-> Exact scoring formulas are a build-time decision — expect to tune them after a few real sessions. First implementation should make every constant (target WPM band, points per filler, monologue threshold) a named config value, not a magic number.
+> Tunables (target WPM bands, points per filler, monologue thresholds, weights) are user-facing settings; the fixed model-shape constants are named and documented in `scoring.js` / `attention.js` / `metrics.js`. Expect to tune after a few real sessions.
 
 ---
 
 ## Screens
 
 ### 1. Session Setup
-Mode selector, Rehearsal/Live toggle, pacing profile, mic check (input level meter), **learning objectives / course outcomes upload**, big **GO LIVE** button. Filler words are auto-detected — no configuration needed.
+Mode selector, lecture length, pacing profile, mic check (input level meter), **learning objectives / course outcomes** (typed or uploaded; outcomes pre-fill from the mode), big **GO LIVE** button plus **Upload MP4**. Filler words are auto-detected — no configuration needed.
 
 ### 2. Live Dashboard (the main event)
 Everything glanceable from 10 feet away:
@@ -178,14 +180,15 @@ Everything glanceable from 10 feet away:
 - **ON AIR indicator** — unambiguous mic-hot state. During nonlecture activity the lamp goes dark and a **red frame surrounds the whole UI** (not recording).
 
 ### 3. Post-Session Report
-Appears after the Whisper + Claude passes finish (with progress states, since this takes ~30–90 s):
+Appears after the transcription + fact-check passes finish (with progress states, since this takes ~30–90 s):
 
 - Headline score + five subscores, compared against your previous sessions.
 - **Monologue graph** — talk-duration bars between interactions across the lecture.
 - WPM-over-time line with target band; energy-over-time line.
 - Filler/tic breakdown table (which words, how often, when).
 - Stutter/restart list with transcript context.
-- **Accuracy report** — each flagged statement quoted, with Claude's explanation and severity.
+- **Accuracy report** — each flagged statement quoted, with the model's explanation and severity.
+- **Deep Analysis** — a manual button (with a pre-run cost estimate) that runs the thorough content review + objective/outcome alignment; results save with the session.
 - Full transcript, annotated (fillers highlighted, interactions marked, flags linked).
 - **Save Session** (→ localStorage) and **Export JSON** (→ download) buttons.
 
@@ -232,9 +235,17 @@ Rehearsal mode has no such concerns — it's just you.
   "transcript": [{ "t": 0, "end": 4.2, "text": "Alright, today we're talking about loops." }],
   "customFillerList": ["um", "uh", "right?"],
   "learningObjectives": ["Students can write a for loop over a list"],
-  "courseOutcomes": ["Design, implement, and debug small Python programs"]
+  "courseOutcomes": ["Design, implement, and debug small Python programs"],
+  "deepAnalysis": {
+    "summary": "…", "contentFindings": [], "objectives": [
+      { "text": "…", "scope": "lecture", "status": "covered", "minutes": 6, "evidence": [{ "t": 310, "note": "…" }], "comment": "…" }
+    ],
+    "suggestions": ["…"], "model": "claude-opus-4-8", "costUSD": 0.14, "ranAt": "2026-07-12T15:40"
+  }
 }
 ```
+
+(`deepAnalysis` is present only if the instructor ran the manual deep-analysis pass for that session.)
 
 ## API Surface (Express)
 
@@ -242,15 +253,15 @@ Rehearsal mode has no such concerns — it's just you.
 |---|---|
 | `GET /api/modes` | List available mode files |
 | `GET /api/status` | Key/ffmpeg configuration state (never returns secrets) |
-| `POST /api/transcribe` | Receives session audio → Whisper → returns word-timestamped transcript → **deletes audio** |
-| `POST /api/transcribe-video` | Testing pipeline: MP4 upload → ffmpeg strips a small mono audio track (**video deleted immediately**, audio deleted after read) → Whisper → word-timestamped transcript |
+| `POST /api/transcribe` | Receives session audio → active transcription provider → returns word-timestamped transcript → **deletes audio** |
+| `POST /api/transcribe-video` | Testing pipeline: MP4 upload → ffmpeg strips a small mono audio track (**video deleted immediately**, audio deleted after read) → active transcription provider → word-timestamped transcript |
 | `POST /api/factcheck` | Receives transcript + mode id → active fact-check model → returns accuracy flags |
 | `GET/POST /api/settings` | Dev panel provider switching: active providers + catalog with pricing (never returns secrets) |
 | `POST /api/deep-analysis` | **Manual, paid pass** — transcript + mode + objectives/outcomes → active deep-analysis model → content review, per-outcome alignment (covered/partial/missed with timestamps + minutes), coaching suggestions |
 
 Everything else — live transcription, tone analysis, metrics, scoring, storage — happens in the browser. API keys live in server environment variables (or `.env` locally) and never reach the client.
 
-**Estimated running cost:** a 50-minute lecture ≈ $0.30 (Whisper) + a few cents (Claude, using a small model like Haiku for the fact-check pass). Well under $1/lecture.
+**Estimated running cost:** a 50-minute lecture ≈ $0.30 transcription (AssemblyAI or Whisper) + under a cent for the Haiku fact-check. The optional deep-analysis button adds roughly $0.10–0.25 on Opus 4.8 (estimate shown before you click; actual cost shown after). Well under $1/lecture either way.
 
 ---
 
@@ -280,21 +291,19 @@ Mode file format, `/api/factcheck` with Claude, accuracy report, full five-subsc
 
 ### Testing pipeline — Upload MP4
 
-Next to GO LIVE, an **Upload MP4** button (visible only when the server has ffmpeg and `OPENAI_API_KEY`) runs a recorded lecture through the *exact same* analysis code as a live session — the point is predictable, repeatable testing of every feature:
+Next to GO LIVE, an **Upload MP4** button (always visible; the server reports a clear error if ffmpeg or the transcription key is missing) runs a recorded lecture through the *exact same* analysis code as a live session — the point is predictable, repeatable testing of every feature:
 
-- Server extracts a mono 16 kHz Opus track with ffmpeg (~12 MB for 50 min); the **video is deleted the moment extraction finishes** and the audio right after transcription. Local-machine testing feature — the button hides itself if ffmpeg is absent (e.g., on Render).
-- Whisper word timestamps drive the same filler/stutter/WPM/attention/fact-check/scoring paths as live sessions.
+- Server extracts a mono 16 kHz Opus track with ffmpeg (~12 MB for 50 min); the **video is deleted the moment extraction finishes** and the audio right after transcription.
+- Precision-transcript word timestamps drive the same filler/stutter/WPM/attention/fact-check/scoring paths as live sessions.
 - **Silence inference**: word gaps ≥ 2 min (configurable: "Upload: silence = activity") become inferred nonlecture blocks, so Engagement and the Attention resets behave realistically.
 - Vocal energy is not computed for uploads (v1); its weight is renormalized out, like an unavailable accuracy pass.
 - Upload sessions are tagged (`type: "upload"`, filename shown), appear in History with an ⬆ badge, and are **excluded from personal records and trend lines** so test runs never pollute real coaching data.
 
-### Phase 4 — Polish & future ideas (not committed)
-More modes; planned-topic coverage checks ("you never got to Z today"); transcript redaction around nonlecture boundaries; per-lecture written coaching summary from Claude; comparing rehearsal vs. live runs of the same lecture.
+### Phase 5 — Swappable providers & deep analysis ✅ (shipped)
+Provider adapter layer (`providers/`) with a catalog of transcription + analysis endpoints; dev-panel switching persisted server-side; AssemblyAI verbatim disfluency transcription as the default precision pass; the **AI objective-coverage analysis** shipped as the manual Deep Analysis pass — per-objective covered/partial/missed with timestamped evidence, estimated minutes, accuracy commentary, and coaching suggestions, with a cost estimate before the run and actual cost after.
 
-**AI objective-coverage analysis** (objectives/outcomes capture already ships in Phase 1):
-- Map transcript segments to the session's learning objectives and report **time spent on each objective** (including "never covered").
-- Combine with the fact-check pass to summarize **how much related content was relayed for each objective, and how accurately**.
-- Roll the same analysis up to the course level: cumulative coverage of the **student learning outcomes** across all saved sessions of a mode, showing which SLOs are on track and which are starving.
+### Phase 6 — Future ideas (not committed)
+More modes; planned-topic coverage checks ("you never got to Z today"); transcript redaction around nonlecture boundaries; comparing rehearsal vs. live runs of the same lecture; **course-level SLO rollup** — cumulative coverage of the student learning outcomes across all saved sessions of a mode, showing which SLOs are on track and which are starving; Deepgram as a third transcription provider; a live audio-based "hesitations" counter (long mid-sentence silences).
 
 ---
 
