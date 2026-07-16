@@ -1,16 +1,23 @@
 // Lecture Rater — application orchestrator.
 // Views: setup → live → processing → report, plus history.
 
-import { loadSettings, saveSettings, activeFillerList, DEFAULTS, PACE_PROFILES, PACE_ZONES, classifyWpm } from './config.js';
+import { loadSettings, saveSettings, activeFillerList, DEFAULTS, PACE_PROFILES, PACE_ZONES, classifyWpm, classifyDysfluency, classifyFillerRate, DYSFLUENCY_CONVERSATIONAL_PER_100 } from './config.js';
 import { speechSupported, LiveSpeech } from './speech.js';
 import { EnergyAnalyzer } from './audio-energy.js';
 import { SessionRecorder } from './recorder.js';
-import { SessionMetrics, countFillersFromWords, detectStutters, lectureStretches } from './metrics.js';
+import { SessionMetrics, countFillersFromWords, detectStutters, lectureStretches, dysfluencyPer100Words, totalWordCount } from './metrics.js';
 import { computeScores } from './scoring.js';
 import * as store from './storage.js';
 import { drawLineChart, drawMonologueBars, drawTimelineStrip, drawSparkline, drawAttentionChart, dialAngle, INK } from './charts.js';
 import { initDevPanel, logUsage } from './dev-panel.js';
 import { estimateAttention, blocksToMinutes } from './attention.js';
+import {
+  analysisPlanForMode,
+  isArticulationMode,
+  openArticulationSetup,
+  articulationPromptText,
+  timingAssessment,
+} from './articulation.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,6 +38,7 @@ let micCheckRaf = 0;
 let live = null;            // { metrics, speech, energy, recorder, stream, timer, interimEl }
 let currentSession = null;  // report currently displayed
 let currentSessionSaved = false;
+let sessionStarting = false; // guards against a double Go Live (repeat clicks / async modal)
 
 // ============================================================ AI settings
 // Server-side provider configuration (/api/settings): which transcription
@@ -108,6 +116,7 @@ async function initSetup() {
       list.querySelectorAll('.mode-card').forEach((c) => c.classList.remove('selected'));
       card.classList.add('selected');
       loadOutcomesForMode(mode.id);
+      applyObjectivesAvailability(mode);
       updateGoLive();
     });
     list.appendChild(card);
@@ -207,6 +216,8 @@ const SETTING_FIELDS = [
   ['targetInteractionGapSec', 'Target lecture stretch (s)'],
   ['pointsPerFillerPerMin', 'Clarity pts / filler-per-min'],
   ['pointsPerStutterPerMin', 'Clarity pts / stutter-per-min'],
+  ['conversationalDysfluencyPer100', 'Conversational dysfluency /100 words'],
+  ['pointsPerDysfluencyOver6', 'Clarity pts / dysfluency-per-100w over conversational'],
   ['interactionExclusionSec', 'Live exclusion window (s)'],
   ['uploadSilenceNonlectureSec', 'Upload: silence = activity (s)'],
 ];
@@ -302,6 +313,18 @@ function loadOutcomesForMode(modeId) {
   const saved = localStorage.getItem(outcomesKey(modeId));
   $('course-outcomes').value = saved || (mode?.learningOutcomes || []).join('\n');
   $('slo-mode-tag').textContent = `· ${mode?.title || modeId}`;
+}
+
+/** Articulation Practice has no lecture objectives or course outcomes — it uses
+ *  Topic Alignment instead. Disable the whole box (typing + uploads) for that
+ *  mode; every other mode keeps it fully editable. */
+function applyObjectivesAvailability(mode) {
+  const off = isArticulationMode(mode);
+  $('objectives-setup-module').classList.toggle('objectives-disabled', off);
+  $('objectives-disabled-note').classList.toggle('hidden', !off);
+  for (const id of ['lecture-objectives', 'course-outcomes', 'objectives-file', 'outcomes-file']) {
+    $(id).disabled = off;
+  }
 }
 
 $('settings-reset').addEventListener('click', () => {
@@ -401,7 +424,7 @@ function arcPath(cx, cy, r, a1, a2) {
 
 // ============================================================ live session
 
-$('golive-btn').addEventListener('click', startSession);
+$('golive-btn').addEventListener('click', onGoLive);
 $('end-btn').addEventListener('click', () => {
   if (confirm('End this session and run the post-session analysis?')) endSession();
 });
@@ -418,8 +441,73 @@ $('transcript-toggle').addEventListener('change', (e) => {
   $('transcript-module').classList.toggle('captions-off', !e.target.checked);
 });
 
-async function startSession() {
+/** Go Live entry point. Articulation Practice always shows its setup modal
+ *  first (every time, even after a prior session). Then — for every mode — a
+ *  large START gate appears; recording and the timer do not begin until the
+ *  user clicks START or presses Space. `sessionStarting` prevents a second
+ *  start from repeat clicks or async steps resolving late. */
+async function onGoLive() {
+  if (live || sessionStarting) return;
+  sessionStarting = true;
+  try {
+    const mode = modes.find((m) => m.id === selectedModeId);
+    const plan = analysisPlanForMode(mode);
+
+    let articulation = null;
+    if (plan.preSessionModal) {
+      articulation = await openArticulationSetup();
+      if (!articulation) return;   // cancelled — nothing starts
+    }
+
+    const ready = await showStartGate(plan);
+    if (!ready) return;            // backed out of the gate
+
+    await startSession(articulation);
+  } finally {
+    sessionStarting = false;
+  }
+}
+
+let startGateResolve = null;
+
+/** Large "ready" overlay shown after Go Live (and after the articulation modal,
+ *  if any). Resolves true when the user clicks START or presses Space, false if
+ *  they cancel or press Escape. Recording begins only on true. */
+function showStartGate(plan) {
+  return new Promise((resolve) => {
+    const gate = $('start-gate');
+    const startBtn = $('start-btn');
+    $('start-gate-title').textContent =
+      plan.liveLabels === 'presentation' ? 'READY TO PRESENT' : 'READY TO GO LIVE';
+
+    gate.classList.remove('hidden');
+    startBtn.disabled = false;
+    setTimeout(() => startBtn.focus(), 0);
+
+    let done = false;
+    const finish = (go) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('keydown', onKey, true);
+      gate.classList.add('hidden');
+      startGateResolve = null;
+      resolve(go);
+    };
+    const onKey = (e) => {
+      if (e.code === 'Space') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    startBtn.onclick = () => finish(true);
+    $('start-cancel').onclick = () => finish(false);
+    gate.onclick = (e) => { if (e.target === gate) finish(false); };
+    startGateResolve = finish;
+  });
+}
+
+async function startSession(articulation = null) {
   if (live) return;
+  sessionStarting = true;
   stopMicCheck();
 
   let stream;
@@ -427,6 +515,7 @@ async function startSession() {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
     alert(`Microphone unavailable: ${err.message}`);
+    sessionStarting = false;
     return;
   }
 
@@ -464,7 +553,9 @@ async function startSession() {
     alert(err.message);
   }
 
-  live = { metrics, energy, recorder, speech, stream, recording, timer: 0, interimEl, fastSince: null, attn: [], lastAttnT: -10 };
+  const targetSec = articulation ? articulation.targetMin * 60 : null;
+  live = { metrics, energy, recorder, speech, stream, recording, timer: 0, interimEl, fastSince: null, attn: [], lastAttnT: -10, articulation, targetSec };
+  applyLiveLabels(analysisPlanForMode(modes.find((m) => m.id === selectedModeId)), articulation);
 
   buildDial();
   $('wpm-readout').textContent = '—';
@@ -489,6 +580,35 @@ async function startSession() {
   showView('live');
 
   live.timer = setInterval(liveTick, 200);
+  sessionStarting = false;
+}
+
+/** Swap lecture-specific wording for presentation wording in Articulation
+ *  Practice, and show the topic/target banner. Reuses the same underlying
+ *  metrics — only visible labels change, and only for this mode. */
+function applyLiveLabels(plan, articulation) {
+  const presentation = plan.liveLabels === 'presentation';
+  $('lbl-pace').textContent = presentation ? 'Presentation Pace' : 'Pace · WPM';
+  $('lbl-continuous').textContent = presentation ? 'Continuous Speaking Time' : 'Continuous Lecture';
+
+  const banner = $('artic-live-banner');
+  if (presentation && articulation) {
+    banner.classList.remove('hidden');
+    updateArticulationBanner(0);
+  } else {
+    banner.classList.add('hidden');
+  }
+}
+
+/** Live topic + target + progress readout during Articulation Practice. */
+function updateArticulationBanner(elapsedSec) {
+  const a = live?.articulation;
+  if (!a) return;
+  $('artic-live-banner').innerHTML =
+    `<span><span class="abx-label">Practice</span> <span class="abx-val amber">Articulation</span></span>` +
+    `<span><span class="abx-label">Topic</span> <span class="abx-val">${esc(articulationPromptText(a))}</span></span>` +
+    `<span><span class="abx-label">Target</span> <span class="abx-val">${a.targetMin} min</span></span>` +
+    `<span><span class="abx-label">Progress</span> <span class="abx-val">${fmtClock(elapsedSec)} / ${fmtClock(a.targetMin * 60)}</span></span>`;
 }
 
 function liveTick() {
@@ -501,11 +621,15 @@ function liveTick() {
   $('timer-nonlecture').textContent = fmtClock(m.nonlectureSec());
   $('timer-total').textContent = fmtClock(t);
 
-  // warn as the planned lecture length approaches, alert when over
-  const plannedSec = settings.lectureLengthMin * 60;
+  // warn as the planned length (articulation target, else lecture length)
+  // approaches, alert when over. Never auto-stops — just colors the timer.
+  const plannedSec = live.targetSec ?? settings.lectureLengthMin * 60;
+  const warnSec = live.targetSec ? Math.min(30, plannedSec * 0.15) : settings.lectureEndWarnMin * 60;
   const totalRow = $('timer-total').closest('.timer-row');
   totalRow.classList.toggle('over', t >= plannedSec);
-  totalRow.classList.toggle('near', t < plannedSec && t >= plannedSec - settings.lectureEndWarnMin * 60);
+  totalRow.classList.toggle('near', t < plannedSec && t >= plannedSec - warnSec);
+
+  if (live.articulation) updateArticulationBanner(t);
 
   const gap = m.continuousLectureSec();
   const sw = $('gap-stopwatch');
@@ -639,7 +763,7 @@ function autoscroll(el) {
 
 async function endSession() {
   if (!live) return;
-  const { metrics, energy, recorder, speech, stream } = live;
+  const { metrics, energy, recorder, speech, stream, articulation } = live;
   clearInterval(live.timer);
   live = null;
 
@@ -689,6 +813,13 @@ async function endSession() {
     courseOutcomes: parseObjectives($('course-outcomes').value),
     precision: false,
   };
+
+  // Articulation Practice: persist the chosen prompt + target so the report
+  // and History can render the specialized view and reopen it later.
+  if (articulation) {
+    session.articulation = { ...articulation };
+    session.targetDurationSec = articulation.targetMin * 60;
+  }
 
   // live captions ran the whole lecture (free, but tracked for completeness)
   if (session.lectureSec > 30) {
@@ -745,9 +876,9 @@ async function endSession() {
  * Used by both live sessions (endSession) and uploaded videos. */
 async function factcheckAndScore(session) {
   const sessionMode = modes.find((m) => m.id === session.mode);
-  if (sessionMode?.factcheck === false) {
+  if (sessionMode?.factcheck === false || isArticulationSession(session)) {
     session.accuracyFlags = null;
-    setProc('proc-factcheck', 'skipped', 'mode has no content check');
+    setProc('proc-factcheck', 'skipped', isArticulationSession(session) ? 'articulation — no fact-check' : 'mode has no content check');
   } else {
     setProc('proc-factcheck', 'active', 'reviewing…');
     try {
@@ -986,19 +1117,37 @@ function scoreColor(v) {
   return v >= 75 ? INK.green : v >= 50 ? INK.amber : INK.red;
 }
 
+/** A session belongs to Articulation Practice if it carries articulation data
+ *  (robust for saved/imported sessions) or its mode is the articulation kind. */
+function isArticulationSession(session) {
+  return !!session.articulation || isArticulationMode(modes.find((m) => m.id === session.mode));
+}
+
 function renderReport(session) {
   showView('report');
   const mode = modes.find((m) => m.id === session.mode);
+  const articulation = isArticulationSession(session);
 
-  const lecSec = session.lectureSec ?? session.durationSec;
-  const actSec = session.nonlectureSec ?? 0;
-  const blocks = session.timeline.nonlecture?.length ?? session.timeline.interactions?.length ?? 0;
-  $('report-meta').innerHTML = [
-    `${fmtDate(session.sessionId)}`,
-    `${esc(mode?.title || session.mode)}${session.type === 'live' ? ' · LIVE CLASSROOM' : ''}${session.type === 'upload' ? ` · UPLOADED VIDEO · ${esc(session.sourceFile || '')}` : ''}`,
-    `LECTURE ${fmtClock(lecSec)} · ACTIVITY ${fmtClock(actSec)} (${session.durationSec ? Math.round((actSec / session.durationSec) * 100) : 0}%) · TOTAL ${fmtClock(session.durationSec)}${session.plannedMin ? ` of ${session.plannedMin} min planned` : ''}`,
-    `${blocks} nonlecture block${blocks === 1 ? '' : 's'} · ${session.precision ? 'precision transcript' : 'live transcript only'}`,
-  ].join('<br>');
+  // Articulation Practice replaces content/outcome sections with topic-focused
+  // analysis: hide fact-check and outcome-alignment modules for these sessions.
+  $('accuracy-module').classList.toggle('hidden', articulation);
+  $('lbl-deep-analysis').textContent = articulation
+    ? 'Articulation Analysis — Topic, Engagement & Rhetoric'
+    : 'Deep Analysis — Content & Outcome Alignment';
+
+  if (articulation) {
+    renderArticulationMeta(session, mode);
+  } else {
+    const lecSec = session.lectureSec ?? session.durationSec;
+    const actSec = session.nonlectureSec ?? 0;
+    const blocks = session.timeline.nonlecture?.length ?? session.timeline.interactions?.length ?? 0;
+    $('report-meta').innerHTML = [
+      `${fmtDate(session.sessionId)}`,
+      `${esc(mode?.title || session.mode)}${session.type === 'live' ? ' · LIVE CLASSROOM' : ''}${session.type === 'upload' ? ` · UPLOADED VIDEO · ${esc(session.sourceFile || '')}` : ''}`,
+      `LECTURE ${fmtClock(lecSec)} · ACTIVITY ${fmtClock(actSec)} (${session.durationSec ? Math.round((actSec / session.durationSec) * 100) : 0}%) · TOTAL ${fmtClock(session.durationSec)}${session.plannedMin ? ` of ${session.plannedMin} min planned` : ''}`,
+      `${blocks} nonlecture block${blocks === 1 ? '' : 's'} · ${session.precision ? 'precision transcript' : 'live transcript only'}`,
+    ].join('<br>');
+  }
 
   $('overall-score').textContent = session.scores.overall;
   $('overall-score').style.color = scoreColor(session.scores.overall);
@@ -1032,6 +1181,8 @@ function renderReport(session) {
 
   // charts (after layout settles)
   requestAnimationFrame(() => drawReportCharts(session));
+
+  renderFluency(session);
 
   // filler breakdown
   const byWord = {};
@@ -1095,10 +1246,11 @@ function renderReport(session) {
         .join('')
     : '';
 
-  // learning objectives & outcomes (shown when the session carries any)
-  const objectives = session.learningObjectives || [];
-  const outcomes = session.courseOutcomes || [];
-  $('objectives-module').classList.toggle('hidden', !objectives.length && !outcomes.length);
+  // learning objectives & outcomes (shown when the session carries any) —
+  // never for Articulation Practice, which uses Topic Alignment instead.
+  const objectives = articulation ? [] : (session.learningObjectives || []);
+  const outcomes = articulation ? [] : (session.courseOutcomes || []);
+  $('objectives-module').classList.toggle('hidden', articulation || (!objectives.length && !outcomes.length));
   $('objectives-report').innerHTML =
     (objectives.length
       ? `<div class="obj-group-title">Lecture objectives — this session</div>
@@ -1115,6 +1267,193 @@ function renderReport(session) {
   $('save-session-btn').disabled = currentSessionSaved;
 }
 
+// ============================================================ articulation report
+// Report header, timing feedback, and the specialized AI analysis for
+// Articulation Practice sessions. The AI pass is a manual button (like Deep
+// Analysis) so a failure never blocks the locally-computed delivery metrics.
+
+const a = (session) => session.articulation || {};
+
+function renderArticulationMeta(session, mode) {
+  const art = a(session);
+  const target = session.targetDurationSec ?? (art.targetMin ? art.targetMin * 60 : 0);
+  const timing = timingAssessment(session.durationSec, target);
+  const promptText = articulationPromptText(art);
+
+  $('report-meta').innerHTML = `
+    <div class="artic-report-head">
+      <span><span class="abx-label">${fmtDate(session.sessionId)}</span></span>
+      <span><span class="abx-val" style="color:var(--amber)">${esc(mode?.title || 'Articulation Practice')}</span></span>
+    </div>
+    <div class="artic-report-head">
+      <span><span class="abx-label">Topic</span> <span class="abx-val">${esc(promptText)}</span></span>
+      ${art.topicId === 'other' && art.customTopic ? '<span><span class="abx-label">custom prompt</span></span>' : ''}
+    </div>
+    <div class="artic-report-head">
+      <span><span class="abx-label">Target</span> <span class="abx-val">${target ? fmtClock(target) : '—'}</span></span>
+      <span><span class="abx-label">Actual</span> <span class="abx-val">${fmtClock(session.durationSec)}</span></span>
+      <span><span class="abx-label">Timing</span> <span class="abx-val" style="color:${timing.code === 'close' ? 'var(--green)' : 'var(--amber)'}">${esc(timing.label)}</span></span>
+    </div>`;
+}
+
+/** Compact delivery metrics sent to the AI (it must not recompute them). */
+function articulationMetricsSummary(session) {
+  const durMin = Math.max((session.lectureSec ?? session.durationSec) / 60, 0.5);
+  const wpm = session.timeline.wpm.filter(([, w]) => w > 0).map(([, w]) => w);
+  const energy = session.timeline.energy.map(([, e]) => e);
+  const stretches = lectureStretches(session.timeline, session.durationSec).map((g) => g.len);
+  return {
+    avgWpm: wpm.length ? wpm.reduce((s, w) => s + w, 0) / wpm.length : null,
+    fillerCount: session.timeline.fillers.length,
+    fillersPerMin: session.timeline.fillers.length / durMin,
+    stutterCount: session.timeline.stutters?.length ?? 0,
+    longestStretchSec: stretches.length ? Math.max(...stretches) : session.durationSec,
+    meanEnergy: energy.length ? energy.reduce((s, e) => s + e, 0) / energy.length : null,
+  };
+}
+
+async function renderArticulationAnalysis(session) {
+  const body = $('deep-analysis-body');
+
+  if (session.articulationAnalysis) {
+    body.innerHTML = articulationAnalysisHtml(session, session.articulationAnalysis) +
+      `<div class="da-actions"><button class="btn subtle" id="artic-run-btn">Re-run analysis</button>
+       <span class="dim-note" id="artic-run-note"></span></div>`;
+    $('artic-run-btn')?.addEventListener('click', () => runArticulationAnalysis(session));
+    return;
+  }
+
+  if (!session.transcript?.length) {
+    body.innerHTML = `<p class="dim-note">This analysis needs a transcript — none was captured for this session. The delivery metrics above are still available.</p>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <p class="dim-note">Evaluates how well your presentation fulfilled the chosen prompt (Topic Alignment),
+    an AI opinion on how engaging and entertaining it is, and notable rhetorical language — quoting your own
+    words. Uses paid API credits — nothing runs until you click. Your delivery metrics above are already computed.</p>
+    <div class="da-actions">
+      <button class="btn primary" id="artic-run-btn">Run Articulation Analysis</button>
+      <span class="dim-note" id="artic-run-note">estimating cost…</span>
+    </div>`;
+  $('artic-run-btn')?.addEventListener('click', () => runArticulationAnalysis(session));
+
+  const est = await deepCostEstimate(session);
+  const note = $('artic-run-note');
+  if (note) note.textContent = est ? `~$${est.cost.toFixed(2)} estimated · ${est.modelLabel}` : 'cost estimate unavailable (server offline?)';
+}
+
+async function runArticulationAnalysis(session) {
+  const btn = $('artic-run-btn');
+  const note = $('artic-run-note');
+  btn.disabled = true;
+  note.textContent = 'analyzing… this can take 30–120 s';
+
+  try {
+    const payload = session.transcript.map((seg) => ({ t: seg.t, text: seg.text }));
+    if (!payload.length) throw new Error('no transcript to analyze');
+    const art = a(session);
+    const r = await fetch('/api/deep-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        analysisKind: 'articulation',
+        transcript: payload,
+        articulation: {
+          topicId: art.topicId,
+          topicLabel: art.topicLabel,
+          customTopic: art.customTopic || '',
+          targetMin: art.targetMin,
+        },
+        actualMin: session.durationSec / 60,
+        metrics: articulationMetricsSummary(session),
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+
+    session.articulationAnalysis = {
+      ...data.analysis,
+      model: data.model,
+      provider: data.provider,
+      usage: data.usage,
+      costUSD: data.costUSD,
+      ranAt: new Date().toISOString().slice(0, 16),
+    };
+    logUsage({
+      role: 'articulation-analysis',
+      provider: data.provider,
+      model: data.model,
+      inputTokens: data.usage?.inputTokens,
+      outputTokens: data.usage?.outputTokens,
+      costUSD: data.costUSD ?? null,
+    });
+
+    if (session === currentSession) {
+      currentSessionSaved = false;
+      $('save-session-btn').textContent = 'Save Session';
+      $('save-session-btn').disabled = false;
+    }
+    renderArticulationAnalysis(session);
+  } catch (err) {
+    btn.disabled = false;
+    note.textContent = `failed — ${err.message}`;
+  }
+}
+
+function articulationAnalysisHtml(session, an) {
+  const target = session.targetDurationSec ?? (a(session).targetMin ? a(session).targetMin * 60 : 0);
+  const timing = timingAssessment(session.durationSec, target);
+  const rating = (r) => `<span class="artic-rating ${esc(r)}">${esc(r)}</span>`;
+  const row = (key, val) => (val ? `<div class="a-row"><span class="a-key">${esc(key)}</span>${esc(val)}</div>` : '');
+  const list = (title, items) =>
+    items?.length ? `<div class="a-sub">${esc(title)}</div><ul>${items.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : '';
+
+  const ta = an.topicAlignment || {};
+  const en = an.engagement || {};
+  const rh = an.rhetorical || {};
+
+  const rhetorical = rh.examples?.length
+    ? rh.examples.map((e) => `
+        <div class="artic-quote">
+          <blockquote>“${esc(e.quote)}”</blockquote>
+          <span class="a-tech">${esc(e.technique || 'technique')}</span>
+          <div class="a-why">${esc(e.why)}</div>
+        </div>`).join('')
+    : `<p class="dim-note">${esc(rh.note || 'No standout rhetorical moments were identified.')}</p>`;
+
+  return `
+    <div class="da-meta mono dim">ran ${esc(an.ranAt || '')} · ${esc(an.provider || '')} ${esc(an.model || '')}
+      ${an.costUSD != null ? `· actual cost $${an.costUSD.toFixed(an.costUSD < 0.1 ? 3 : 2)}` : ''}
+      ${an.usage ? `· ${an.usage.inputTokens} in / ${an.usage.outputTokens} out tokens` : ''}</div>
+    <div class="artic-analysis">
+      ${an.summary ? `<p class="a-summary">${esc(an.summary)}</p>` : ''}
+
+      <div class="artic-section-title">Topic Alignment ${rating(ta.rating || 'adequate')}</div>
+      ${row('On topic', ta.onTopic)}
+      ${row('Structure', ta.structure)}
+      ${row('Support', ta.support)}
+      ${row('Depth for length', ta.detailForDuration)}
+      ${ta.comment ? `<p class="a-summary">${esc(ta.comment)}</p>` : ''}
+
+      <div class="artic-section-title">Engagement &amp; Entertainment ${rating(en.rating || 'adequate')}
+        <span class="artic-opinion-tag">AI opinion, not measured</span></div>
+      ${row('Opening', en.opening)}
+      ${row('Curiosity', en.curiosity)}
+      ${list('Memorable moments', en.memorable)}
+      ${list('Flat / abstract spots', en.flatSpots)}
+      ${list('Make it more engaging', en.suggestions)}
+
+      <div class="artic-section-title">Language &amp; Rhetorical Highlights</div>
+      ${rhetorical}
+      ${list('Where to add stronger language', rh.suggestions)}
+
+      <div class="artic-section-title">Delivery &amp; Timing</div>
+      <div class="a-row"><span class="a-key">Timing</span>${esc(timing.label)} (target ${target ? fmtClock(target) : '—'}, actual ${fmtClock(session.durationSec)})</div>
+      ${list('Recommendations', an.recommendations)}
+    </div>`;
+}
+
 // ============================================================ deep analysis
 // The paid, on-demand pass: thorough content review + learning-outcome
 // alignment. NEVER automatic — the instructor clicks the button, sees an
@@ -1122,6 +1461,8 @@ function renderReport(session) {
 // persists with Save Session and re-renders from History).
 
 async function renderDeepAnalysis(session) {
+  if (isArticulationSession(session)) return renderArticulationAnalysis(session);
+
   const body = $('deep-analysis-body');
 
   if (session.deepAnalysis) {
@@ -1317,6 +1658,44 @@ function drawReportAttention(session) {
     `instructional-time average ${Math.round(avg)}% · lowest ${Math.round(scores[lowIdx])}% at ${fmtClock(samples[lowIdx].t)}`;
 }
 
+/** Delivery Fluency module: dysfluencies per 100 words + fillers per minute,
+ *  each with a research-based threshold flag. Only shown when a precision
+ *  transcript exists (live-only counts are a floor, not a true total). */
+function renderFluency(session) {
+  const module = $('fluency-module');
+  const per100 = dysfluencyPer100Words(session);
+  if (per100 == null) { module.classList.add('hidden'); return; }
+  module.classList.remove('hidden');
+
+  const words = totalWordCount(session);
+  const fillers = session.timeline.fillers.length;
+  const stutters = session.timeline.stutters?.length ?? 0;
+  const durMin = Math.max((session.lectureSec ?? session.durationSec) / 60, 0.5);
+  const fpm = fillers / durMin;
+
+  const dBand = classifyDysfluency(per100);
+  const fBand = classifyFillerRate(fpm);
+  const chip = (band) =>
+    `<span class="fl-flag" style="color:${ZONE_INK[band.color]};border-color:${ZONE_INK[band.color]}">${band.label}</span>`;
+
+  $('fluency-body').innerHTML = `
+    <div class="fl-grid">
+      <div class="fl-tile">
+        <div class="fl-value mono" style="color:${ZONE_INK[dBand.color]}">${per100.toFixed(1)}</div>
+        <div class="fl-unit">dysfluencies / 100 words</div>
+        ${chip(dBand)}
+        <div class="fl-detail mono">${fillers + stutters} events · ${words} words · ${fillers} filler / ${stutters} stutter</div>
+      </div>
+      <div class="fl-tile">
+        <div class="fl-value mono" style="color:${ZONE_INK[fBand.color]}">${fpm.toFixed(1)}</div>
+        <div class="fl-unit">filler words / minute</div>
+        ${chip(fBand)}
+        <div class="fl-detail mono">lecture-time average · ${fillers} fillers over ${fmtClock(session.lectureSec ?? session.durationSec)}</div>
+      </div>
+    </div>
+    <p class="dim-note">≈${DYSFLUENCY_CONVERSATIONAL_PER_100} dysfluencies per 100 words is a conversational level. Optimum college lecturing runs ~1–3 filler words/min; above 5/min reads as high, and ~10/min measurably hurts how an audience perceives the speaker.</p>`;
+}
+
 function renderAnnotatedTranscript(session) {
   const el = $('report-transcript');
   // marks: nonlecture blocks (new sessions) or legacy interaction taps
@@ -1423,11 +1802,13 @@ function renderHistory() {
     const row = document.createElement('div');
     row.className = 'session-row';
     const subs = SUBSCORES.map(([k]) => `${k.slice(0, 3).toUpperCase()} ${s.scores?.[k] ?? '—'}`).join(' · ');
+    const kind = s.articulation ? '🎤 articulation' : s.type === 'upload' ? '⬆ upload' : s.type === 'live' ? 'live' : 'rehearsal';
+    const artSub = s.articulation ? ` · “${esc(articulationPromptText(s.articulation))}”` : '';
     row.innerHTML = `
       <div class="s-score" style="color:${scoreColor(s.scores?.overall ?? 0)}">${s.scores?.overall ?? '—'}</div>
       <div class="s-meta">
-        <div class="s-title">${esc(modes.find((m) => m.id === s.mode)?.title || s.mode)} · ${s.type === 'upload' ? '⬆ upload' : s.type === 'live' ? 'live' : 'rehearsal'}</div>
-        <div class="s-sub">${fmtDate(s.sessionId)} · ${fmtClock(s.durationSec)}${s.nonlectureSec ? ` · lec ${fmtClock(s.lectureSec)} / act ${fmtClock(s.nonlectureSec)}` : ''}</div>
+        <div class="s-title">${esc(modes.find((m) => m.id === s.mode)?.title || s.mode)} · ${kind}</div>
+        <div class="s-sub">${fmtDate(s.sessionId)} · ${fmtClock(s.durationSec)}${s.nonlectureSec ? ` · lec ${fmtClock(s.lectureSec)} / act ${fmtClock(s.nonlectureSec)}` : ''}${artSub}</div>
       </div>
       <div class="s-subscores">${subs}</div>
       <div class="s-actions">

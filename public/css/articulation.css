@@ -1,0 +1,240 @@
+/* ==========================================================================
+   articulation.css — Articulation Practice mode
+   Contents: pre-session setup modal (overlay, prompt/duration choices,
+   validation), live-session topic/target banner, and report analysis sections.
+   Loads after dev-panel.css, before responsive.css. See base.css for the map.
+   ========================================================================== */
+
+/* ------------------------------------------------------ setup modal */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1002; /* above the dev overlay (1001) and scanlines (999) */
+  background: rgba(5, 6, 8, 0.72);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh 16px 16px;
+  overflow-y: auto;
+}
+.modal-card {
+  width: 100%;
+  max-width: 620px;
+  margin: 0;
+}
+.modal-card,
+.modal-card:hover {
+  transform: none;
+  border-color: var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 4px 22px rgba(0, 0, 0, 0.45);
+}
+.modal-card::after { display: none; }
+.modal-card:hover > .module-label { color: var(--dim); }
+
+.modal-close { margin-left: auto; min-height: 30px; padding: 2px 10px; }
+
+.artic-fieldset {
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 12px 14px 14px;
+  margin: 14px 0;
+}
+.artic-fieldset legend {
+  font-family: var(--font-label);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--amber);
+  padding: 0 6px;
+}
+
+/* prompt choices */
+.artic-topics { display: flex; flex-direction: column; gap: 8px; }
+.artic-choice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.artic-choice:hover { border-color: var(--dim); }
+.artic-choice:has(input:checked) {
+  border-color: var(--amber);
+  background: rgba(255, 180, 84, 0.06);
+}
+.artic-choice:has(input:focus-visible) { outline: 2px solid var(--amber); outline-offset: 2px; }
+.artic-choice input { margin-top: 3px; accent-color: var(--amber); flex: none; }
+.artic-choice-body { display: flex; flex-direction: column; gap: 2px; }
+.artic-choice-title { font-weight: 600; color: var(--ink); font-size: 14.5px; }
+.artic-choice-sub { color: var(--dim); font-size: 12.5px; line-height: 1.35; }
+
+/* duration chips */
+.artic-durations { display: flex; flex-wrap: wrap; gap: 8px; }
+.artic-chip {
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--dim);
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.artic-chip:hover { border-color: var(--dim); color: var(--ink); }
+.artic-chip:has(input:checked) {
+  border-color: var(--amber);
+  color: var(--amber);
+  background: rgba(255, 180, 84, 0.08);
+}
+.artic-chip:has(input:focus-visible) { outline: 2px solid var(--amber); outline-offset: 2px; }
+.artic-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+/* custom inputs + validation */
+.artic-custom { margin-top: 12px; }
+.artic-custom label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-bottom: 5px;
+}
+.artic-custom input {
+  width: 100%;
+  background: #101318;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  padding: 8px 10px;
+}
+.artic-custom input:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; border-color: var(--amber); }
+.artic-error {
+  color: var(--rec-red);
+  font-size: 12.5px;
+  margin-top: 6px;
+  min-height: 1em;
+  display: none;
+}
+.artic-error.show { display: block; }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* ------------------------------------------------------ objectives box (disabled in articulation) */
+
+.objectives-disabled .obj-block { opacity: 0.4; }
+.objectives-disabled .obj-block textarea { cursor: not-allowed; }
+.objectives-disabled .upload-label { pointer-events: none; }
+.objectives-disabled-note { color: var(--amber); }
+
+/* ------------------------------------------------------ live banner */
+
+.artic-live-banner {
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--amber);
+  border-radius: var(--radius);
+  background: #101318;
+  padding: 9px 14px;
+  margin-bottom: 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: baseline;
+}
+.artic-live-banner .abx-label { color: var(--faint); letter-spacing: 0.14em; text-transform: uppercase; font-size: 10px; }
+.artic-live-banner .abx-val { color: var(--ink); }
+.artic-live-banner .abx-val.amber { color: var(--amber); }
+
+/* ------------------------------------------------------ report sections */
+
+.artic-report-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+.artic-report-head .abx-val { color: var(--ink); }
+
+.artic-rating {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--edge);
+}
+.artic-rating.strong { color: var(--green); border-color: rgba(79, 208, 140, 0.5); }
+.artic-rating.adequate { color: var(--amber); border-color: rgba(255, 180, 84, 0.5); }
+.artic-rating.weak { color: var(--rec-red); border-color: rgba(255, 59, 65, 0.5); }
+
+.artic-section-title {
+  font-family: var(--font-label);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin: 18px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.artic-opinion-tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+
+.artic-analysis dl { margin: 0; }
+.artic-analysis .a-row { margin: 6px 0; line-height: 1.45; }
+.artic-analysis .a-row .a-key {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-right: 8px;
+}
+.artic-analysis .a-summary { color: var(--ink); line-height: 1.5; margin: 4px 0 2px; }
+.artic-analysis ul { margin: 4px 0 10px; padding-left: 18px; }
+.artic-analysis li { margin: 3px 0; line-height: 1.4; }
+.artic-analysis .a-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 8px 0 2px;
+}
+.artic-quote {
+  border-left: 2px solid var(--cyan);
+  padding: 4px 0 4px 12px;
+  margin: 8px 0;
+}
+.artic-quote blockquote { margin: 0 0 3px; color: var(--ink); font-style: italic; }
+.artic-quote .a-tech { color: var(--cyan); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+.artic-quote .a-why { color: var(--dim); font-size: 13px; }

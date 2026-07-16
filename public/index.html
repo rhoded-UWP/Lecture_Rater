@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="css/report.css">
   <link rel="stylesheet" href="css/history.css">
   <link rel="stylesheet" href="css/dev-panel.css">
+  <link rel="stylesheet" href="css/articulation.css">
   <link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
@@ -91,8 +92,9 @@
         </div>
 
         <div class="col">
-          <div class="module">
+          <div class="module" id="objectives-setup-module">
             <div class="module-label"><span class="led"></span>Learning Objectives &amp; Outcomes</div>
+            <p class="dim-note objectives-disabled-note hidden" id="objectives-disabled-note">Not used in Articulation Practice — the report uses <strong>Topic Alignment</strong> instead.</p>
             <div class="obj-block">
               <label class="obj-title" for="lecture-objectives">Lecture objectives — this session</label>
               <textarea id="lecture-objectives" rows="3" placeholder="one objective per line — e.g.&#10;Students can write a for loop over a list"></textarea>
@@ -129,6 +131,7 @@
 
     <!-- ============================== 2 · LIVE DASHBOARD -->
     <section class="view" id="view-live">
+      <div class="artic-live-banner hidden" id="artic-live-banner" role="status" aria-live="polite"></div>
       <div class="live-grid">
 
         <div class="module attention-module" id="attention-module"
@@ -141,7 +144,7 @@
         </div>
 
         <div class="module gauge-module">
-          <div class="module-label"><span class="led lit-green"></span>Pace · WPM</div>
+          <div class="module-label"><span class="led lit-green"></span><span id="lbl-pace">Pace · WPM</span></div>
           <svg class="dial" id="wpm-dial" viewBox="0 0 200 158" aria-label="Words per minute dial">
             <path id="dial-arc-bg" fill="none" stroke="#232830" stroke-width="10" stroke-linecap="round"/>
             <g id="dial-zones" fill="none" stroke-width="10"></g>
@@ -162,7 +165,7 @@
         </div>
 
         <div class="module gauge-module">
-          <div class="module-label"><span class="led lit-green"></span>Continuous Lecture</div>
+          <div class="module-label"><span class="led lit-green"></span><span id="lbl-continuous">Continuous Lecture</span></div>
           <div class="readout huge stopwatch" id="gap-stopwatch">0:00</div>
           <div class="readout-unit"><span id="nl-count">0</span> nonlecture blocks</div>
         </div>
@@ -258,6 +261,10 @@
           <div class="module-label"><span class="led"></span>Energy Over Time</div>
           <canvas id="energy-chart" class="chart"></canvas>
         </div>
+        <div class="module hidden" id="fluency-module">
+          <div class="module-label"><span class="led"></span>Delivery Fluency</div>
+          <div id="fluency-body"></div>
+        </div>
         <div class="module">
           <div class="module-label"><span class="led"></span>Filler / Tic Breakdown</div>
           <table class="data-table" id="filler-table"></table>
@@ -266,7 +273,7 @@
           <div class="module-label"><span class="led"></span>Stutters &amp; Restarts</div>
           <ul class="flag-list" id="stutter-list"></ul>
         </div>
-        <div class="module span2">
+        <div class="module span2" id="accuracy-module">
           <div class="module-label"><span class="led"></span>Accuracy Report</div>
           <div id="accuracy-report"></div>
         </div>
@@ -276,7 +283,7 @@
           <p class="dim-note">Run Deep Analysis below to measure coverage, time per objective, and accuracy of related content.</p>
         </div>
         <div class="module span2" id="deep-analysis-module">
-          <div class="module-label"><span class="led"></span>Deep Analysis — Content &amp; Outcome Alignment</div>
+          <div class="module-label"><span class="led"></span><span id="lbl-deep-analysis">Deep Analysis — Content &amp; Outcome Alignment</span></div>
           <div id="deep-analysis-body"></div>
         </div>
         <div class="module span2">
@@ -335,6 +342,58 @@
         <p class="dev-error hidden" id="dev-error">Incorrect password.</p>
       </div>
       <div id="dev-panel" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- ============================== Articulation Practice setup modal -->
+  <div class="modal-overlay hidden" id="artic-overlay" role="dialog" aria-modal="true" aria-labelledby="artic-title">
+    <div class="modal-card module">
+      <div class="module-label"><span class="led lit-amber"></span>
+        <span id="artic-title">Set Up Articulation Practice</span>
+        <button class="btn subtle modal-close" id="artic-cancel-x" aria-label="Cancel">✕</button>
+      </div>
+      <p class="dim-note">Choose a speaking prompt and a target length, then rehearse. Your delivery is captured and analyzed exactly like a live session, with feedback tuned to articulation, engagement, and your chosen topic.</p>
+
+      <form id="artic-form" novalidate>
+        <fieldset class="artic-fieldset">
+          <legend>Speaking prompt</legend>
+          <div class="artic-topics" id="artic-topics"></div>
+          <div class="artic-custom hidden" id="artic-custom-wrap">
+            <label for="artic-custom">Your topic or prompt</label>
+            <input type="text" id="artic-custom" maxlength="200" autocomplete="off"
+                   placeholder="e.g. Why recursion is worth the headache">
+            <p class="artic-error" id="artic-custom-error" role="alert" aria-live="assertive"></p>
+          </div>
+        </fieldset>
+
+        <fieldset class="artic-fieldset">
+          <legend>Target duration</legend>
+          <div class="artic-durations" id="artic-durations"></div>
+          <div class="artic-custom hidden" id="artic-dur-wrap">
+            <label for="artic-dur">Minutes (2–75)</label>
+            <input type="number" id="artic-dur" min="2" max="75" step="1" inputmode="numeric" autocomplete="off">
+            <p class="artic-error" id="artic-dur-error" role="alert" aria-live="assertive"></p>
+          </div>
+          <p class="dim-note">The target guides pacing feedback — recording does not stop automatically when you reach it.</p>
+        </fieldset>
+
+        <div class="modal-actions">
+          <button type="button" class="btn subtle" id="artic-cancel">Cancel</button>
+          <button type="submit" class="btn primary" id="artic-begin">Begin Practice</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================== Go Live "ready" gate (all modes) -->
+  <div class="start-gate hidden" id="start-gate" role="dialog" aria-modal="true" aria-labelledby="start-gate-title">
+    <div class="start-gate-inner">
+      <div class="start-gate-kicker mono" id="start-gate-title">READY TO GO LIVE</div>
+      <button class="start-btn" id="start-btn">
+        <span class="start-btn-dot"></span> START
+      </button>
+      <div class="start-gate-hint mono">click <strong>START</strong> or press <kbd>SPACE</kbd> to begin recording</div>
+      <button class="btn subtle start-cancel" id="start-cancel">Cancel</button>
     </div>
   </div>
 

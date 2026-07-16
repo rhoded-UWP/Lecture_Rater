@@ -1,7 +1,7 @@
 // The five 0–100 subscores and the weighted headline score.
 // Every constant comes from settings (config.js) — tune there, not here.
 
-import { lectureStretches } from './metrics.js';
+import { lectureStretches, dysfluencyPer100Words } from './metrics.js';
 import { classifyWpm, PACE_ZONES } from './config.js';
 
 // Scoring-model shape constants. These define HOW penalties scale — the
@@ -74,11 +74,20 @@ function paceScore(wpmTimeline, profileKey, s) {
   return clamp100(score);
 }
 
-// Clarity: fillers/min and stutters/min each cost configured points.
+// Clarity: fillers/min and stutters/min each cost configured points. When a
+// precision transcript gives a reliable word count, dysfluencies beyond the
+// conversational level (~6 per 100 words) cost extra — normalizing for pace,
+// since a fast talker racks up fillers/min without being less fluent per word.
 function clarityScore(session, durationMin, s) {
   const fpm = session.timeline.fillers.length / durationMin;
   const spm = (session.timeline.stutters?.length ?? 0) / durationMin;
-  return clamp100(100 - fpm * s.pointsPerFillerPerMin - spm * s.pointsPerStutterPerMin);
+  let score = 100 - fpm * s.pointsPerFillerPerMin - spm * s.pointsPerStutterPerMin;
+
+  const per100 = dysfluencyPer100Words(session);
+  if (per100 != null && per100 > s.conversationalDysfluencyPer100) {
+    score -= (per100 - s.conversationalDysfluencyPer100) * s.pointsPerDysfluencyOver6;
+  }
+  return clamp100(score);
 }
 
 // Engagement: uninterrupted lecture stretches between nonlecture activity

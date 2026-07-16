@@ -43,6 +43,7 @@ import {
 } from './providers/catalog.js';
 import { transcribeAudio } from './providers/transcription.js';
 import { runAnalysis, extractJson } from './providers/analysis.js';
+import { buildArticulationPrompt, validateArticulationAnalysis } from './providers/articulation-analysis.js';
 import { getSettings, updateSettings } from './settings-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -293,9 +294,16 @@ ${transcriptText}`;
 // and course outcome, was it covered, how much time did it get, and was the
 // related content accurate?
 app.post('/api/deep-analysis', async (req, res) => {
-  const { transcript, modeId, lectureObjectives = [], courseOutcomes = [] } = req.body || {};
+  const { transcript, modeId, lectureObjectives = [], courseOutcomes = [], analysisKind } = req.body || {};
   if (!Array.isArray(transcript) || !transcript.length) {
     return res.status(400).json({ error: 'Expected { transcript: [{t, text}], modeId, lectureObjectives?, courseOutcomes? }.' });
+  }
+
+  // Articulation Practice: topic alignment + engagement + rhetorical analysis
+  // instead of content review + outcome alignment. Reuses the same model,
+  // token accounting, and JSON-extraction path as the lecture pass.
+  if (analysisKind === 'articulation') {
+    return runArticulationAnalysis(req, res, transcript);
   }
 
   let mode = null;
@@ -381,6 +389,39 @@ ${transcriptText}`;
     res.status(err.status || 500).json({ error: `Deep analysis failed: ${err.message}`, detail: err.detail || undefined });
   }
 });
+
+/** Articulation Practice analysis. `transcript` is validated by the caller. */
+async function runArticulationAnalysis(req, res, transcript) {
+  const { articulation = {}, actualMin = 0, metrics = {} } = req.body || {};
+  const transcriptText = transcript.map((s) => `[${stamp(toSeconds(s.t))}] ${s.text}`).join('\n');
+
+  const prompt = buildArticulationPrompt({
+    topicId: articulation.topicId,
+    topicLabel: articulation.topicLabel,
+    customTopic: articulation.customTopic,
+    targetMin: Number(articulation.targetMin) || 0,
+    actualMin: Number(actualMin) || 0,
+    metrics,
+    transcriptText,
+  });
+
+  try {
+    const result = await runAnalysis(getSettings().deepAnalysisModelId, prompt, { maxTokens: 8000 });
+    const parsed = extractJson(result.text, 'object');
+    if (!parsed || typeof parsed !== 'object') {
+      return res.status(502).json({ error: 'Articulation-analysis response was not valid JSON.', raw: result.text.slice(0, 500) });
+    }
+    res.json({
+      analysis: validateArticulationAnalysis(parsed),
+      model: result.model,
+      provider: result.provider,
+      usage: result.usage,
+      costUSD: result.costUSD,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: `Articulation analysis failed: ${err.message}`, detail: err.detail || undefined });
+  }
+}
 
 const stamp = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 

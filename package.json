@@ -5,7 +5,10 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test",
+    "test:unit": "node --test test/articulation.test.js test/articulation-analysis.test.js test/modes.test.js test/persistence.test.js test/fluency.test.js",
+    "test:e2e": "node --test test/e2e/articulation.e2e.test.js"
   },
   "engines": {
     "node": ">=18"

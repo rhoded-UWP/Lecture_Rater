@@ -2,7 +2,7 @@
 
 A web app that listens to you teach — live in the classroom or in rehearsal — and coaches your lecture delivery. It transcribes as you speak, tracks pace, filler words, stutters, and vocal energy, graphs continuous lecture time between nonlecture activities, and fact-checks what you told them afterward.
 
-**Status:** Built through Phase 5 — live dashboard, precision transcription (verbatim disfluencies), fact-check, scoring, swappable AI providers (dev panel), and on-demand deep analysis with learning-outcome alignment
+**Status:** Built through Phase 5 — live dashboard, precision transcription (verbatim disfluencies), fact-check, scoring, swappable AI providers (dev panel), and on-demand deep analysis with learning-outcome alignment. Plus **Articulation Practice** mode (rehearse a short talk → topic/engagement/rhetoric feedback), a **Delivery Fluency** report (dysfluencies-per-100-words + research-banded filler rate), and a **START gate** on Go Live. Test suite runs with `npm test`.
 **User:** Single user (Dan), no accounts, no auth, mic only — no video, no stored recordings.
 
 ### Running locally
@@ -70,7 +70,9 @@ Audio is recorded **in the browser only**, uploaded **once** to the Express serv
 
 ### Sessions
 
-A session starts when you arm the mic and ends when you stop it. At session start you choose a **Mode** — the course being taught. Three ship today: *Default — Any Subject*, *CS1010 - Intro to Computer Science*, and *CS1430 - Intro to Programming*.
+A session starts when you arm the mic and ends when you stop it. At session start you choose a **Mode**. Four ship today: *Default — Any Subject*, *CS1010 - Intro to Computer Science*, *CS1430 - Intro to Programming*, and *Articulation Practice* (see below).
+
+**GO LIVE opens a START gate (all modes).** Clicking GO LIVE no longer begins recording immediately — a large full-screen **START** button appears first. The mic, timer, and on-air recording begin only when you click START or press **Space**; Escape/Cancel backs out. (Articulation Practice shows its topic/duration setup modal first, *then* the START gate.)
 
 (The Rehearsal / Live Classroom toggle was removed — all sessions currently record as rehearsal. The stricter Live-mode privacy code paths remain in the codebase should classroom mode return; see Privacy below.)
 
@@ -100,6 +102,17 @@ A mode is a content/context file, one per subject, stored in the repo at `modes/
 
 Adding a future mode = adding a file. The mode selector reads whatever files exist. No code changes. `learningOutcomes` holds the course's official SLOs — they pre-fill the setup screen's outcomes box on mode selection and feed the deep-analysis alignment.
 
+A mode file may also carry `"factcheck": false` (skip the content check) and `"kind": "articulation"` (see next). Which analysis passes a mode uses is decided in one place — `analysisPlanForMode(mode)` in `public/js/articulation.js` — a feature-flag object (`factcheck`, `outcomeAlignment`, `topicAlignment`, `engagement`, `rhetorical`, `targetDuration`, `preSessionModal`, `liveLabels`). Prefer reading a flag off that plan over testing the mode id in new code.
+
+### Articulation Practice mode
+
+`modes/articulation.json` (`kind: "articulation"`, `factcheck: false`) is for rehearsing a short spoken presentation. Selecting it and clicking GO LIVE opens a **setup modal** (every time) to pick a **speaking prompt** and a **target duration** *before* recording:
+
+- Prompts: *Introduce Yourself to Your Students*, *Introduce a Course*, *Tell a Topic-Related Story*, or *Other Topic* (free-form). Duration: 2/3/4/5 min presets or a custom **2–75 min** value (validated). The target guides pacing feedback; it never auto-stops recording.
+- During the session the topic + target show in a banner and two lecture-specific labels swap to presentation wording ("Presentation Pace", "Continuous Speaking Time"). The **Learning Objectives & Outcomes** box is disabled — it doesn't apply here.
+- The report replaces fact-check and outcome-alignment with a manual, paid **Articulation Analysis** button (reuses `/api/deep-analysis` with `analysisKind: "articulation"`): **Topic Alignment** (did the talk fulfil the prompt, with a clear beginning/middle/end?), an AI-opinion **Engagement & Entertainment** assessment, and **Language & Rhetorical Highlights** (quotes the speaker's own words). Delivery/timing feedback (shorter/close/longer than target) is computed locally, so it survives an AI failure.
+- Saved sessions carry `articulation` (`{topicId, topicLabel, customTopic, targetMin}`), `targetDurationSec`, and (once run) `articulationAnalysis`. Prompt building + response validation live in `providers/articulation-analysis.js`.
+
 ### Learning objectives & outcomes
 
 The Session Setup console accepts two optional lists, typed in or uploaded as `.txt`/`.md` (one per line) or `.json` (array of strings):
@@ -124,6 +137,7 @@ While a nonlecture block is open, the app is **not recording**: speech recogniti
 | **Speaking pace (WPM)** | Word count over a rolling window measured in **lecture time only** (nonlecture blocks don't dilute the rate), classified into research-based bands (see *Pacing scale* below) | ✅ live gauge |
 | **Filler words & verbal tics** | Auto-detected against a built-in filler list (`um, uh, like, you know, so, right?, okay?`; extensible in Scoring Settings) | ✅ live counter (a floor — Web Speech drops many), final counts from the verbatim precision transcript |
 | **Stutters & restarts** | Precision-transcript word timestamps: repeated words ("the the"), part-word stutters ("th-that"), abandoned restarts, long mid-sentence hesitations | ❌ post-session only |
+| **Delivery fluency** | Dysfluencies (fillers + stutters) per 100 words — ≤6 reads as conversational — plus fillers/minute banded against research (≤3 optimum, >5 high, ~10 hurts audience perception). Needs the precision transcript; the dysfluency rate also feeds Clarity | ❌ post-session only |
 | **Vocal energy / tone** | Web Audio API: pitch variance (monotone detection) + volume dynamics, computed locally | ✅ live meter |
 | **Lecture vs nonlecture time** | Nonlecture toggle events — lecture/activity/total timers, longest continuous lecture stretch, stretch trend across the class | ✅ live timeline + timers |
 | **Accuracy** | The active fact-check model reviews the precision transcript against the mode file; each flagged claim gets a quote, an explanation, and a severity | ❌ post-session only |
@@ -152,7 +166,7 @@ Every session ends with **five 0–100 subscores and one headline score**:
 | Subscore | Fed by |
 |---|---|
 | **Pace** | Research-band credit per timeline sample (sweet spot = full credit, slow zones keep most credit, fast zones little) minus penalties for **sustained fast stretches** |
-| **Clarity** | Fillers per minute + stutters/restarts per minute |
+| **Clarity** | Fillers per minute + stutters/restarts per minute; when a precision transcript exists, dysfluencies-per-100-words beyond the conversational level (~6) cost extra (see *Delivery fluency*) |
 | **Engagement** | Nonlecture-activity frequency and continuous-lecture stretch lengths (marathon monologues cost points) |
 | **Vocal Energy** | Pitch/volume variance — monotone stretches cost points |
 | **Accuracy** | Count and severity of fact-check flags |
@@ -166,7 +180,7 @@ Headline score = weighted average (weights and thresholds live in the **Scoring 
 ## Screens
 
 ### 1. Session Setup
-Mode selector, lecture length, pacing profile, mic check (input level meter), **learning objectives / course outcomes** (typed or uploaded; outcomes pre-fill from the mode), big **GO LIVE** button plus **Upload MP4**. Filler words are auto-detected — no configuration needed.
+Mode selector, lecture length, pacing profile, mic check (input level meter), **learning objectives / course outcomes** (typed or uploaded; outcomes pre-fill from the mode — disabled in Articulation Practice), big **GO LIVE** button plus **Upload MP4**. Filler words are auto-detected — no configuration needed. GO LIVE opens the **START gate** (and, in Articulation Practice, the topic/duration modal first) before recording begins.
 
 ### 2. Live Dashboard (the main event)
 Everything glanceable from 10 feet away:
@@ -185,10 +199,11 @@ Appears after the transcription + fact-check passes finish (with progress states
 - Headline score + five subscores, compared against your previous sessions.
 - **Monologue graph** — talk-duration bars between interactions across the lecture.
 - WPM-over-time line with target band; energy-over-time line.
+- **Delivery fluency** — dysfluencies-per-100-words (≤6 = conversational) and fillers-per-minute banded against research (≤3 optimum, >5 high, ~10 hurts audience perception). Precision-transcript sessions only.
 - Filler/tic breakdown table (which words, how often, when).
 - Stutter/restart list with transcript context.
-- **Accuracy report** — each flagged statement quoted, with the model's explanation and severity.
-- **Deep Analysis** — a manual button (with a pre-run cost estimate) that runs the thorough content review + objective/outcome alignment; results save with the session.
+- **Accuracy report** — each flagged statement quoted, with the model's explanation and severity. *(Hidden in Articulation Practice.)*
+- **Deep Analysis** — a manual button (with a pre-run cost estimate) that runs the thorough content review + objective/outcome alignment; results save with the session. *(In Articulation Practice this becomes **Articulation Analysis**: topic alignment + engagement + rhetorical highlights.)*
 - Full transcript, annotated (fillers highlighted, interactions marked, flags linked).
 - **Save Session** (→ localStorage) and **Export JSON** (→ download) buttons.
 
@@ -257,9 +272,16 @@ Rehearsal mode has no such concerns — it's just you.
 | `POST /api/transcribe-video` | Testing pipeline: MP4 upload → ffmpeg strips a small mono audio track (**video deleted immediately**, audio deleted after read) → active transcription provider → word-timestamped transcript |
 | `POST /api/factcheck` | Receives transcript + mode id → active fact-check model → returns accuracy flags |
 | `GET/POST /api/settings` | Dev panel provider switching: active providers + catalog with pricing (never returns secrets) |
-| `POST /api/deep-analysis` | **Manual, paid pass** — transcript + mode + objectives/outcomes → active deep-analysis model → content review, per-outcome alignment (covered/partial/missed with timestamps + minutes), coaching suggestions |
+| `POST /api/deep-analysis` | **Manual, paid pass** — transcript + mode + objectives/outcomes → active deep-analysis model → content review, per-outcome alignment (covered/partial/missed with timestamps + minutes), coaching suggestions. With `analysisKind: "articulation"` it instead returns topic-alignment + engagement + rhetorical analysis (see Articulation Practice) |
 
 Everything else — live transcription, tone analysis, metrics, scoring, storage — happens in the browser. API keys live in server environment variables (or `.env` locally) and never reach the client.
+
+### Tests
+
+`npm test` runs the whole suite with Node's built-in runner (no extra deps):
+
+- **Unit** (`test/*.test.js`, `npm run test:unit`) — DOM-free logic imported straight from `public/js/*` and `providers/*`: mode feature flags, articulation topic/duration validation, the articulation prompt builder + response validator, mode-file integrity, session persistence/back-compat, and the delivery-fluency metric + Clarity feed.
+- **E2E** (`test/e2e/*.e2e.test.js`, `npm run test:e2e`) — drives real headless Chrome via `puppeteer-core` against a booted server (fake mic): mode selector, the START gate (click + Space), the articulation setup modal + validation, disabled objectives box, live labels, request routing (fact-check skipped, articulation analysis requested), and saved-session shape. Skips gracefully if Chrome/puppeteer are unavailable.
 
 **Estimated running cost:** a 50-minute lecture ≈ $0.30 transcription (AssemblyAI or Whisper) + under a cent for the Haiku fact-check. The optional deep-analysis button adds roughly $0.10–0.25 on Opus 4.8 (estimate shown before you click; actual cost shown after). Well under $1/lecture either way.
 
@@ -301,6 +323,9 @@ Next to GO LIVE, an **Upload MP4** button (always visible; the server reports a 
 
 ### Phase 5 — Swappable providers & deep analysis ✅ (shipped)
 Provider adapter layer (`providers/`) with a catalog of transcription + analysis endpoints; dev-panel switching persisted server-side; AssemblyAI verbatim disfluency transcription as the default precision pass; the **AI objective-coverage analysis** shipped as the manual Deep Analysis pass — per-objective covered/partial/missed with timestamped evidence, estimated minutes, accuracy commentary, and coaching suggestions, with a cost estimate before the run and actual cost after.
+
+### Phase 5.5 — Articulation, fluency & UX ✅ (shipped)
+**Articulation Practice** mode (setup modal → topic + target duration; presentation-tuned live labels; Topic Alignment + Engagement + Rhetorical analysis in place of fact-check/outcome alignment). A **START gate** on Go Live (recording begins on START/Space, all modes). A **Delivery Fluency** report module (dysfluencies-per-100-words + research-banded filler rate) whose dysfluency rate feeds Clarity. Objectives/outcomes box disabled in Articulation Practice. First automated **test suite** (`npm test`).
 
 ### Phase 6 — Future ideas (not committed)
 More modes; planned-topic coverage checks ("you never got to Z today"); transcript redaction around nonlecture boundaries; comparing rehearsal vs. live runs of the same lecture; **course-level SLO rollup** — cumulative coverage of the student learning outcomes across all saved sessions of a mode, showing which SLOs are on track and which are starving; Deepgram as a third transcription provider; a live audio-based "hesitations" counter (long mid-sentence silences).

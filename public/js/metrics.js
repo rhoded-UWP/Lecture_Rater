@@ -259,6 +259,26 @@ export function tokenize(text) {
     .filter(Boolean);
 }
 
+// ---------------------------------------------------------------- fluency
+
+/** Total spoken words across a saved session's transcript (tokenized). */
+export function totalWordCount(session) {
+  return (session.transcript || []).reduce((n, seg) => n + tokenize(seg.text || '').length, 0);
+}
+
+/** Dysfluencies (fillers + stutters/repeats/restarts/hesitations) per 100
+ *  spoken words. Returns null when not measurable — only a precision transcript
+ *  captures disfluencies verbatim and gives a trustworthy word count, so
+ *  live-only sessions (a known floor) and empty transcripts report nothing. */
+export function dysfluencyPer100Words(session) {
+  if (!session?.precision) return null;
+  const words = totalWordCount(session);
+  if (!words) return null;
+  const fillers = session.timeline?.fillers?.length ?? 0;
+  const stutters = session.timeline?.stutters?.length ?? 0;
+  return ((fillers + stutters) / words) * 100;
+}
+
 function normalizeToken(w) {
   return w.toLowerCase().replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, '');
 }

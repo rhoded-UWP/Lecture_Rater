@@ -48,6 +48,32 @@ export function classifyWpm(wpm, profileKey) {
   return 'toofast';
 }
 
+// --- Delivery-fluency bands (research-based; see the Delivery Fluency report) ---
+// Dysfluencies (fillers + stutters/repeats/restarts) per 100 spoken words:
+// ~6 per 100 words is a conversational level; above that reads as higher than
+// conversational. Only meaningful with a precision transcript (verbatim
+// disfluencies). The scoring threshold is the tunable
+// settings.conversationalDysfluencyPer100 (defaults to this constant).
+export const DYSFLUENCY_CONVERSATIONAL_PER_100 = 6;
+
+/** Two-band classification for dysfluencies per 100 words. */
+export function classifyDysfluency(per100) {
+  return per100 <= DYSFLUENCY_CONVERSATIONAL_PER_100
+    ? { key: 'conversational', label: 'CONVERSATIONAL', color: 'green' }
+    : { key: 'elevated', label: 'HIGHER THAN CONVERSATIONAL', color: 'amber' };
+}
+
+// Fillers per minute (whole-session lecture-time average). Optimum college
+// lecturing is ~1–3/min; above 5 reads as high; ~10 measurably hurts how an
+// audience perceives the speaker.
+export function classifyFillerRate(fpm) {
+  if (fpm < 1) return { key: 'pristine', label: 'PRISTINE', color: 'green' };
+  if (fpm < 3) return { key: 'optimum', label: 'OPTIMUM', color: 'green' };
+  if (fpm < 5) return { key: 'elevated', label: 'ELEVATED', color: 'amber' };
+  if (fpm < 10) return { key: 'high', label: 'HIGH FILLER RATE', color: 'orange' };
+  return { key: 'hurts', label: 'HURTS AUDIENCE PERCEPTION', color: 'red' };
+}
+
 export const DEFAULTS = {
   // --- Session ---
   lectureLengthMin: 50,       // planned class length: 50, 75, or custom minutes
@@ -65,6 +91,11 @@ export const DEFAULTS = {
   customFillerWords: [],      // personal tics, edited on the Setup screen
   pointsPerFillerPerMin: 12,  // clarity points lost per (filler/min)
   pointsPerStutterPerMin: 15, // clarity points lost per (stutter/min)
+  // Research fluency threshold — feeds Clarity only when a precision transcript
+  // gives a reliable word count. Dysfluencies/100w beyond conversational cost
+  // extra clarity points (on top of the per-minute rates above).
+  conversationalDysfluencyPer100: 6, // ≤ this reads as conversational (see config classifyDysfluency)
+  pointsPerDysfluencyOver6: 4,        // clarity pts lost per dysfluency/100w above conversational
 
   // --- Engagement ---
   monologueWarnSec: 180,      // stopwatch turns amber here
